@@ -30,7 +30,7 @@ data/          one folder per YouTube video ID = the cache
 4. Disk: about 3 GB for PyTorch plus models. The models download automatically
    on first use (MDX-Net vocal model about 65 MB, Whisper "small" about 500 MB, "large-v3" about 3 GB).
 
-## Setup and run
+## Setup and run (Windows)
 
 ```bat
 cd D:\sandbox\karaoke-prototype
@@ -59,6 +59,30 @@ It times each option on a 60-second excerpt (the old Demucs setup, faster
 Demucs, MDX-Net on CPU, and on your GPU if available), and writes each result
 to `bench_out\` so you can listen to them. Add `--threads 6` to try only the
 fast cores of a hybrid Intel CPU.
+
+## Setup and run (macOS)
+
+Needs **Python 3.11–3.13** on Apple Silicon (M1–M4), or **3.11–3.12** on an
+Intel Mac: the python.org installer or `brew install python@3.12`. ffmpeg is
+included. For YouTube downloads install Deno: `brew install deno` (setup
+offers to do it when Homebrew is present).
+
+```zsh
+cd karaoke-prototype
+zsh setup.sh       # creates .venv and installs everything (safe to re-run)
+./run-mock.sh      # try the UI with fake songs
+./run.sh           # the real thing
+```
+
+Open http://localhost:8000; phones use `http://<your-Mac-IP>:8000` (setup
+prints it). Allow incoming connections for Python if macOS asks.
+
+- Apple Silicon gets the same packages as Windows. Vocal removal and lyrics
+  run on the CPU (OpenVINO and Whisper have no Apple GPU support here).
+- Intel Macs install without Demucs (a library it needs has no Intel-Mac
+  build) and with PyTorch 2.2.2 / NumPy 1.26, the last versions for Intel Macs.
+  The default MDX-Net separator works normally.
+- A `.venv` copied over from Windows is set aside and a Mac one is created.
 
 ### NVIDIA GPU (optional, much faster)
 
