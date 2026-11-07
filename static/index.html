@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karaoke Prototype</title>
+<style>
+  :root {
+    --bg: #0b0a10; --panel: #15131c; --line: #2a2634; --text: #ece8f4; --dim: #8d86a0;
+    --sung: #ffcf3f; --unsung: #ffffff; --accent: #ff4f8b; --ok: #3ddc97; --err: #ff6b6b;
+    --font: "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Noto Sans JP", "Malgun Gothic", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: #221f2b; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  button:hover { border-color: #4a4458; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  input, select { background: #0f0e14; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; }
+
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: 100vh; }
+  body.remote .app { grid-template-columns: minmax(0, 1fr); max-width: 520px; margin: 0 auto; }
+  body.remote { overflow-x: hidden; }
+  body.remote .stage-col { display: none; }
+
+  /* ---------- player ---------- */
+  .stage-col { display: flex; flex-direction: column; min-width: 0; }
+  .stage { position: relative; flex: 1; background: #000; overflow: hidden; }
+  .stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .lyrics { position: absolute; left: 0; right: 0; bottom: 6%; padding: 0 6%; pointer-events: none;
+            filter: drop-shadow(0 2px 0 #000) drop-shadow(0 0 6px rgba(0,0,0,.9)); }
+  .slot { font-size: clamp(20px, 3.3vw, 56px); font-weight: 800; line-height: 1.35; min-height: 1.35em; }
+  .slot.top { text-align: left; } .slot.bottom { text-align: right; }
+  .word { --p: 0%; background: linear-gradient(90deg, var(--sung) var(--p), var(--unsung) var(--p));
+          -webkit-background-clip: text; background-clip: text; color: transparent; white-space: pre-wrap; }
+  .countdown { position: absolute; left: 6%; bottom: calc(6% + 2 * clamp(20px, 3.3vw, 56px) * 1.35 + 8px);
+               color: var(--sung); font-size: clamp(16px, 2.4vw, 32px); letter-spacing: .3em; }
+  .overlay { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+             background: radial-gradient(circle at 50% 40%, #241a33, #0b0a10 70%); padding: 24px; }
+  .overlay h2 { margin: 0 0 8px; font-size: clamp(22px, 3vw, 40px); }
+  .overlay p { color: var(--dim); margin: 6px 0; }
+  .hidden { display: none !important; }
+  .bigbar { width: min(420px, 70vw); height: 8px; background: #2a2634; border-radius: 99px; overflow: hidden; margin: 14px auto 0; }
+  .bigbar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+
+  .controls { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  .controls .title { flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .toggle button { border: 0; border-radius: 0; background: transparent; }
+  .toggle button.on { background: var(--accent); color: #fff; }
+  .offset { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
+
+  /* ---------- side panel ---------- */
+  .side { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .side header { padding: 16px; border-bottom: 1px solid var(--line); }
+  .side h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: #3a2a10; color: var(--sung); font-weight: 600; }
+  form { display: grid; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row > * { min-width: 0; }
+  .msg { font-size: 13px; color: var(--dim); min-height: 1em; overflow-wrap: anywhere; }
+  .msg.err { color: var(--err); }
+  .stats { padding: 10px 16px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .stats b { color: var(--text); font-weight: 600; display: block; font-size: 13px; }
+  .list { overflow-y: auto; flex: 1; padding: 8px; }
+  .empty { color: var(--dim); text-align: center; padding: 30px 10px; font-size: 14px; }
+  .item { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: #1b1823; }
+  .item.now { border-color: var(--accent); }
+  .item .top { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+  .item .pos { color: var(--dim); font-size: 12px; min-width: 34px; }
+  .item .name { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .acts button { padding: 2px 8px; font-size: 12px; }
+  .item .st { font-size: 12px; color: var(--dim); margin-top: 6px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; }
+  .item .st.ok { color: var(--ok); } .item .st.err { color: var(--err); }
+  .pipe { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
+  .pipe div { height: 4px; border-radius: 4px; background: #2a2634; overflow: hidden; }
+  .pipe div > i { display: block; height: 100%; background: var(--accent); }
+  .pipe div.done > i { background: var(--ok); width: 100% !important; }
+
+  .check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--dim); cursor: pointer; user-select: none; }
+  .check input { width: auto; accent-color: var(--accent); }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; padding: 11px; color: var(--dim); border-bottom: 2px solid transparent; }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .tabs .count { font-size: 11px; background: #2a2634; border-radius: 99px; padding: 1px 7px; margin-left: 4px; }
+  .search { padding: 10px 8px 2px; }
+  .hist { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; }
+  .hist:hover { background: #1b1823; }
+  .hist img { width: 96px; height: 54px; object-fit: cover; border-radius: 6px; background: #221f2b; display: block; }
+  .hist .t { font-size: 13px; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .hist .m { font-size: 11px; color: var(--dim); margin-top: 3px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { padding: 0 6px; border-radius: 4px; background: #2a2634; }
+  .tag.ok { color: var(--ok); } .tag.no { color: var(--dim); } .tag.in { color: var(--sung); }
+  .hist button { padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+  .hbtns { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+  button.danger { color: var(--err); }
+  button.armed { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+  .herr { grid-column: 1 / -1; font-size: 12px; color: var(--err); }
+  .lyrics.off, .countdown.off { display: none !important; }
+  #lyrBtn.on, #rmLyrics.on { border-color: var(--accent); }
+  .nowcard { margin: 12px 16px 0; padding: 14px; border-radius: 12px; border: 1px solid var(--accent);
+             background: linear-gradient(160deg, #2a1424, #1b1823 60%); display: grid; gap: 8px; }
+  .nc-label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  .nc-title { font-size: 16px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .nc-status { font-size: 12px; color: var(--dim); }
+  /* Buttons size to their label and wrap to a new line when there's no room. */
+  .nc-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .nc-controls > * { flex: 0 0 auto; max-width: 100%; }
+  .nc-controls button { padding: 10px 14px; white-space: nowrap; }
+  .nc-controls .toggle { display: inline-flex; }
+  #rmPause.on { background: var(--sung); border-color: var(--sung); color: #1a1400; font-weight: 600; }
+  .pausedBadge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 14px 28px;
+                 border-radius: 14px; background: rgba(0,0,0,.65); color: #fff; font-size: clamp(20px, 3vw, 44px);
+                 font-weight: 800; letter-spacing: .08em; pointer-events: none; }
+  .tvlink { display: none; text-align: center; font-size: 12px; color: var(--dim); padding: 14px; }
+  body.remote .tvlink { display: block; }
+  #rmFs.on { border-color: var(--accent); }
+  /* "Stage only": the video fills the whole browser window (used for fullscreen). */
+  body.stage-only .side, body.stage-only .controls { display: none; }
+  body.stage-only .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr; height: 100vh; }
+  body.stage-only .stage { flex: 1; aspect-ratio: auto; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  @media (max-width: 900px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
+    .stage { aspect-ratio: 16 / 9; flex: none; }
+    .side { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <section class="stage-col">
+    <div class="stage" id="stage">
+      <video id="video" playsinline preload="auto"></video>
+      <audio id="inst" preload="auto"></audio>
+      <div class="countdown hidden" id="countdown"></div>
+      <div class="pausedBadge hidden" id="pausedBadge">❚❚ Paused</div>
+      <div class="lyrics"><div class="slot top" id="slot0"></div><div class="slot bottom" id="slot1"></div></div>
+
+      <div class="overlay" id="startOverlay">
+        <div>
+          <h2>Karaoke player</h2>
+          <p>Browsers block sound until you click once.</p>
+          <p style="margin-top:18px"><button class="primary" id="startBtn">Start player</button></p>
+          <p id="joinHint" style="margin-top:18px;font-size:14px"></p>
+        </div>
+      </div>
+      <div class="overlay hidden" id="waitOverlay">
+        <div>
+          <h2 id="waitTitle">No song queued</h2>
+          <p id="waitText">Paste a YouTube link on the right, or open this address on a phone.</p>
+          <div class="bigbar hidden" id="waitBarWrap"><div id="waitBar"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="toggle" title="Switch between original vocals and the AI backing track">
+        <button id="modeOrig">Original</button><button id="modeInst" class="on">Backing track</button>
+      </div>
+      <button id="lyrBtn" title="Show or hide the lyrics">Lyrics: on</button>
+      <button id="offMinus" title="Lyrics earlier">−</button>
+      <span class="offset" id="offVal">0.00 s</span>
+      <button id="offPlus" title="Lyrics later">+</button>
+      <span class="title" id="nowTitle"></span>
+      <button id="playBtn">Pause</button>
+      <button id="skipBtn">Skip ›</button>
+      <button id="fsBtn">Fullscreen</button>
+    </div>
+  </section>
+
+  <aside class="side">
+    <header><h1>Karaoke prototype <span class="badge hidden" id="mockBadge">MOCK MODE</span></h1></header>
+    <div class="nowcard hidden" id="nowCard">
+      <div class="nc-label">On the TV</div>
+      <div class="nc-title" id="rmTitle"></div>
+      <div class="nc-status" id="rmStatus"></div>
+      <div class="nc-controls">
+        <button id="rmPause">❚❚ Pause</button>
+        <div class="toggle"><button id="rmOrig">Original</button><button id="rmInst" class="on">Backing track</button></div>
+        <button id="rmLyrics">Lyrics: on</button>
+        <button id="rmFs">TV fullscreen</button>
+        <button id="rmSkip">Skip ›</button>
+      </div>
+    </div>
+    <form id="addForm">
+      <input id="url" placeholder="Paste a YouTube link" autocomplete="off" required>
+      <div class="row">
+        <input id="singer" placeholder="Your name (optional)" maxlength="20">
+        <select id="lang" title="Song language: helps the lyrics recogniser">
+          <option value="">Language: auto</option>
+          <option value="yue">Cantonese</option>
+          <option value="zh">Mandarin</option>
+          <option value="en">English</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="skipLyrics"> Skip lyrics for this song (faster: vocal removal only)</label>
+      <button class="primary" type="submit">Add to playlist</button>
+      <div class="msg" id="msg"></div>
+    </form>
+    <div class="tabs">
+      <button data-tab="playlist" class="on">Playlist <span class="count" id="plCount">0</span></button>
+      <button data-tab="history">History <span class="count" id="histCount">0</span></button>
+    </div>
+    <div id="tabPlaylist" style="display:contents">
+      <div class="stats" id="stats"></div>
+      <div class="list" id="list"></div>
+    </div>
+    <div id="tabHistory" class="hidden" style="display:contents">
+      <div class="search"><input id="histSearch" placeholder="Search songs" autocomplete="off"></div>
+      <div class="list" id="histList"></div>
+    </div>
+    <a class="tvlink" id="tvLink" href="/?tv">Use this device as the TV screen</a>
+  </aside>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// Phones and tablets always get the remote (phone) view; only a big screen is
+// the player. Override with ?tv (use this device as the TV) or ?remote.
+const params = new URLSearchParams(location.search);
+const isMobileDevice = navigator.userAgentData?.mobile
+  || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);   // iPadOS
+const isRemote = params.has("remote") || (!params.has("tv") && isMobileDevice);
+if (isRemote) document.body.classList.add("remote");
+
+const video = $("video"), inst = $("inst");
+let started = false, loadedId = null, lyrics = [], offset = 0, mode = "inst", lastIdx = -2, advancing = false;
+
+// Small per-browser preferences (may be unavailable, e.g. private windows).
+const pref = {
+  get(k, d) { try { const v = localStorage.getItem("karaoke." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("karaoke." + k, JSON.stringify(v)); } catch { /* ignore */ } },
+};
+
+// ---------------- adding songs ----------------
+// "Skip lyrics" applies to the next song added only: it unticks itself after
+// each add and isn't remembered, so it can't silently skip every later song.
+$("skipLyrics").checked = false;
+
+async function addSong(url) {
+  const msg = $("msg");
+  msg.className = "msg"; msg.textContent = "Adding…";
+  try {
+    const r = await fetch("/api/queue", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, singer: $("singer").value, language: $("lang").value || null,
+                             skip_lyrics: $("skipLyrics").checked }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "failed");
+    const j = data.job;
+    $("skipLyrics").checked = false;
+    msg.textContent = j.ready ? `Added: ${j.title || "song"} is ready to sing.`
+      : !j.skip_lyrics && j.status.includes("transcribe") ? "Added. Extracting lyrics in the background."
+      : "Added. Processing in the background.";
+    poll(); if (currentTab === "history") loadHistory();
+    return true;
+  } catch (err) { msg.className = "msg err"; msg.textContent = err.message; return false; }
+}
+
+$("addForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (await addSong($("url").value)) $("url").value = "";
+});
+
+// ---------------- tabs + history ----------------
+let currentTab = "playlist", histItems = [];
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  currentTab = b.dataset.tab;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+  $("tabPlaylist").classList.toggle("hidden", currentTab !== "playlist");
+  $("tabHistory").classList.toggle("hidden", currentTab !== "history");
+  if (currentTab === "history") loadHistory();
+}));
+
+const fmtDur = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}` : "");
+
+async function loadHistory() {
+  try { histItems = await (await fetch("/api/history")).json(); } catch { return; }
+  $("histCount").textContent = histItems.length;
+  renderHistory();
+}
+
+function renderHistory() {
+  const q = $("histSearch").value.trim().toLowerCase();
+  const items = histItems.filter((h) => !q || (h.title || "").toLowerCase().includes(q) || h.video_id.toLowerCase().includes(q));
+  const list = $("histList");
+  if (!items.length) { list.innerHTML = `<div class="empty">${histItems.length ? "No matching songs." : "No songs yet. Songs you add are kept here."}</div>`; return; }
+  list.innerHTML = items.map((h) => {
+    const busy = h.status.startsWith("waiting") || h.status.startsWith("running");
+    const lyr = h.has_lyrics ? `<span class="tag ok">lyrics</span>`
+      : busy || !h.has_audio ? ""
+      : h.lyrics_skipped ? `<span class="tag no" title="Added with Skip lyrics. + Add (box unticked) extracts them.">lyrics skipped</span>`
+      : `<span class="tag no" title="Lyrics extraction found no words">no lyrics found</span>`;
+    return `<div class="hist">
+      <img loading="lazy" src="https://i.ytimg.com/vi/${h.video_id}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">
+      <div><div class="t" title="${esc(h.title)}">${esc(h.title || h.video_id)}</div>
+        <div class="m">${fmtDur(h.duration) ? `<span>${fmtDur(h.duration)}</span>` : ""}${lyr}
+          ${!h.has_audio ? `<span class="tag no">not processed</span>` : ""}
+          ${busy ? `<span class="tag in">processing</span>` : ""}
+          ${h.in_playlist ? `<span class="tag in">in playlist</span>` : ""}</div></div>
+      <div class="hbtns">
+        <button data-add="${h.video_id}">+ Add</button>
+        ${armedKey === "del:" + h.video_id
+          ? `<button data-del="${h.video_id}" class="armed" title="Tap again to delete for good">Confirm</button>`
+          : `<button data-del="${h.video_id}" class="danger" title="Delete this song's files">Delete</button>`}
+      </div>
+      ${histErrors[h.video_id] ? `<div class="herr">${esc(histErrors[h.video_id])}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+$("histSearch").addEventListener("input", renderHistory);
+$("histList").addEventListener("click", async (e) => {
+  const del = e.target.closest("button[data-del]");
+  if (del) {
+    const id = del.dataset.del;
+    if (!arm("del:" + id)) return;            // first tap only arms it
+    del.disabled = true; del.textContent = "Deleting…";
+    delete histErrors[id];
+    try {
+      const r = await fetch(`/api/songs/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Could not delete");
+    } catch (err) { histErrors[id] = err.message; setTimeout(() => { delete histErrors[id]; renderHistory(); }, 6000); }
+    await loadHistory(); poll();
+    return;
+  }
+  const b = e.target.closest("button[data-add]"); if (!b) return;
+  b.disabled = true;
+  if (await addSong(b.dataset.add)) b.textContent = "Added ✓";
+  else b.disabled = false;
+});
+setInterval(() => { if (currentTab === "history") loadHistory(); }, 5000);
+loadHistory();
+
+const post = (path) => fetch(path, { method: "POST" }).then(poll);
+
+// Two-tap confirm for destructive buttons. The lists are redrawn every second,
+// so the "armed" state lives here (not on the button) and survives a redraw.
+let armedKey = null, armedTimer = null, lastState = null;
+const histErrors = {};
+function arm(key) {
+  clearTimeout(armedTimer);
+  if (armedKey === key) { armedKey = null; return true; }   // second tap: go ahead
+  armedKey = key;
+  armedTimer = setTimeout(() => { armedKey = null; redraw(); }, 3000);
+  redraw();
+  return false;
+}
+function redraw() { if (lastState) render(lastState); renderHistory(); }
+
+// ---------------- playlist + status ----------------
+const STAGES = ["download", "separate", "transcribe"];
+const LABEL = { download: "Downloading video", separate: "Removing vocals", transcribe: "Extracting lyrics" };
+
+function stageInfo(it) {
+  if (!it.status) return { text: "unknown", cls: "" };
+  if (it.status === "done") return { text: it.has_lyrics ? "Ready" : "Ready · no lyrics", cls: "ok", done: 3 };
+  if (it.status === "error") return { text: it.error, cls: "err", done: 0 };
+  const [kind, stage] = it.status.split(":");
+  const idx = STAGES.indexOf(stage);
+  let text = kind === "waiting" ? `Waiting for ${stage} worker` : `${LABEL[stage]} ${Math.round(it.progress * 100)}%`;
+  if (it.skip_lyrics) text += " · lyrics skipped";
+  return { text, cls: "", done: idx, stage: idx, progress: kind === "running" ? it.progress : 0 };
+}
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function render(state) {
+  lastState = state;
+  $("mockBadge").classList.toggle("hidden", !state.mock);
+  const q = state.queues;
+  $("stats").innerHTML = STAGES.map((s) =>
+    `<div><b>${s}</b>${q.running[s]} running · ${q.waiting[s]} waiting</div>`).join("");
+
+  $("plCount").textContent = state.playlist.length;
+  const list = $("list");
+  if (!state.playlist.length) { list.innerHTML = `<div class="empty">Playlist is empty.</div>`; }
+  else list.innerHTML = state.playlist.map((it, i) => {
+    const si = stageInfo(it);
+    const bars = STAGES.map((_, k) => {
+      if (k < si.done) return `<div class="done"><i></i></div>`;
+      if (k === si.stage) return `<div><i style="width:${Math.round((si.progress || 0) * 100)}%"></i></div>`;
+      return `<div><i style="width:0"></i></div>`;
+    }).join("");
+    const t = it.timings && Object.keys(it.timings).length ? Object.entries(it.timings).map(([k, v]) => `${k} ${v}s`).join(" · ") : "";
+    return `<div class="item ${i === 0 ? "now" : ""}">
+      <div class="top"><span class="pos">${i === 0 ? "NOW" : "#" + i}</span>
+        <span class="name" title="${esc(it.title)}">${esc(it.title || it.video_id)}${it.singer ? ` <span style="color:var(--dim)">· ${esc(it.singer)}</span>` : ""}</span>
+        <span class="acts">${i > 1 ? `<button data-up="${i}">↑</button>` : ""}${
+          armedKey === "rm:" + it.video_id
+            ? `<button data-rm="${i}" data-vid="${it.video_id}" class="armed">Tap again to remove</button>`
+            : `<button data-rm="${i}" data-vid="${it.video_id}" title="Remove from playlist (stays in History)">✕</button>`}</span></div>
+      <div class="pipe">${bars}</div>
+      <div class="st ${si.cls}"><span>${esc(si.text)}</span><span>${t}</span></div>
+    </div>`;
+  }).join("");
+
+  nowItem = state.playlist[0] || null;
+  applyPlayerState(state.player);
+  renderNowCard();
+  if (!isRemote) syncPlayer(state.playlist[0]);
+}
+
+$("list").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.rm) {
+    // The song playing now needs a second tap: removing it cuts the singer off.
+    if (b.dataset.rm === "0" && !arm("rm:" + b.dataset.vid)) return;
+    armedKey = null;
+    post(`/api/playlist/${b.dataset.rm}/remove?video_id=${b.dataset.vid}`);
+  }
+  if (b.dataset.up) post(`/api/playlist/${b.dataset.up}/up`);
+});
+
+async function poll() {
+  try { render(await (await fetch("/api/state")).json()); } catch (e) { /* server restarting */ }
+}
+setInterval(poll, 1000); poll();
+
+// ---------------- player ----------------
+$("joinHint").textContent = `On a phone, open ${location.origin} to add songs and control the TV`;
+$("startBtn").onclick = () => { started = true; $("startOverlay").classList.add("hidden"); poll(); };
+
+function syncPlayer(cur) {
+  if (!started) return;
+  const wait = $("waitOverlay");
+  if (!cur) {
+    unload(); wait.classList.remove("hidden");
+    $("waitTitle").textContent = "No song queued";
+    $("waitText").innerHTML = `Paste a YouTube link on the right, or open <b>${location.origin}</b> on a phone.`;
+    $("waitBarWrap").classList.add("hidden");
+    return;
+  }
+  if (cur.video_id === loadedId) {
+    // Lyrics finished while the song was already playing: pick them up.
+    if (cur.has_lyrics && !lyrics.length && !fetchingLyrics) loadLyrics(cur.video_id);
+    return;
+  }
+  if (!cur.ready) {
+    unload(); wait.classList.remove("hidden");
+    const si = stageInfo(cur);
+    $("waitTitle").textContent = cur.title || "Preparing song…";
+    $("waitText").textContent = cur.status === "error" ? "Failed: " + cur.error + " (press Skip)" : si.text;
+    $("waitBarWrap").classList.toggle("hidden", cur.status === "error");
+    $("waitBar").style.width = `${Math.round(((si.done || 0) + (si.progress || 0)) / 3 * 100)}%`;
+    return;
+  }
+  load(cur);
+}
+
+function unload() {
+  if (loadedId === null) return;
+  loadedId = null; video.pause(); inst.pause(); ignorePauseUntil = Date.now() + 1500;
+  video.removeAttribute("src"); inst.removeAttribute("src"); video.load(); inst.load();
+  lyrics = []; lastIdx = -2; $("slot0").innerHTML = ""; $("slot1").innerHTML = ""; $("nowTitle").textContent = "";
+  updateLyricsButton(); applyPaused();
+}
+
+let fetchingLyrics = false;
+async function loadLyrics(id) {
+  fetchingLyrics = true;
+  let lines = [];
+  try { lines = (await (await fetch(`/media/${id}/lyrics.json?t=${Date.now()}`)).json()).lines || []; } catch { /* none */ }
+  fetchingLyrics = false;
+  if (loadedId !== id) return;
+  lyrics = lines; lastIdx = -2;
+  updateLyricsButton();
+}
+
+async function load(cur) {
+  loadedId = cur.video_id; advancing = false;
+  $("waitOverlay").classList.add("hidden");
+  $("nowTitle").textContent = (cur.title || cur.video_id) + (cur.singer ? ` — ${cur.singer}` : "");
+  const base = `/media/${cur.video_id}`;
+  ignorePauseUntil = Date.now() + 1500;      // switching the video source isn't a user pause
+  video.src = `${base}/video.mp4`;
+  inst.src = `${base}/instrumental.mp3`;
+  lyrics = []; lastIdx = -2; updateLyricsButton();
+  if (cur.has_lyrics) loadLyrics(cur.video_id);
+  applyMode();
+  if (!paused) video.play().catch(() => {});
+  applyPaused();
+}
+
+// ---------------- shared player settings (TV + phones) ----------------
+// Audio mode and lyrics visibility live on the server, so a phone can change
+// them and the TV follows on its next poll (within about a second).
+let showLyrics = true, fullscreen = false, paused = false, playerRev = -1, pendingChanges = 0;
+
+function applyPlayerState(ps) {
+  // Skip while our own change is in flight, and skip anything older than what we have.
+  if (!ps || pendingChanges > 0 || ps.rev < playerRev) return;
+  playerRev = ps.rev;
+  mode = ps.mode; showLyrics = ps.show_lyrics; fullscreen = !!ps.fullscreen; paused = !!ps.paused;
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); renderNowCard();
+}
+
+async function setPlayer(patch) {
+  // Apply at once for a snappy feel, then let the server's answer confirm it.
+  if ("mode" in patch) mode = patch.mode;
+  if ("show_lyrics" in patch) showLyrics = patch.show_lyrics;
+  if ("fullscreen" in patch) fullscreen = patch.fullscreen;
+  if ("paused" in patch) paused = patch.paused;
+  pendingChanges++;                          // ignore polls until the server replies
+  // Runs inside the click handler, so on the TV a real fullscreen request is allowed.
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); renderNowCard();
+  let ps = null;
+  try {
+    const r = await fetch("/api/player", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+    ps = await r.json();
+  } catch { /* next poll will resync */ }
+  pendingChanges--;
+  if (ps && pendingChanges === 0) applyPlayerState(ps);
+}
+
+// Show / hide lyrics; disabled when the song has none.
+function updateLyricsButton() {
+  const b = $("lyrBtn");
+  const has = lyrics.length > 0;
+  b.disabled = !has;
+  b.textContent = !has ? "No lyrics" : showLyrics ? "Lyrics: on" : "Lyrics: off";
+  b.classList.toggle("on", has && showLyrics);
+  document.querySelector(".lyrics").classList.toggle("off", !showLyrics);
+  $("countdown").classList.toggle("off", !showLyrics);
+}
+$("lyrBtn").onclick = () => setPlayer({ show_lyrics: !showLyrics });
+updateLyricsButton();
+
+// Original = the video's own audio. Backing track = video muted + separated
+// instrumental played alongside, kept locked to the video's clock.
+function applyMode() {
+  video.muted = mode === "inst";
+  inst.muted = mode !== "inst";
+  for (const [o, i] of [["modeOrig", "modeInst"], ["rmOrig", "rmInst"]]) {
+    $(o).classList.toggle("on", mode === "orig");
+    $(i).classList.toggle("on", mode === "inst");
+  }
+}
+$("modeOrig").onclick = () => setPlayer({ mode: "orig" });
+$("modeInst").onclick = () => setPlayer({ mode: "inst" });
+
+// Now-playing card on phones (/?remote): the same controls, driving the TV.
+let nowItem = null;
+function renderNowCard() {
+  if (!isRemote) return;
+  // Always shown on phones, so the TV's fullscreen can be controlled any time.
+  $("nowCard").classList.remove("hidden");
+  $("rmFs").textContent = fullscreen ? "Exit TV fullscreen" : "TV fullscreen";
+  $("rmFs").classList.toggle("on", fullscreen);
+  for (const id of ["rmOrig", "rmInst", "rmSkip"]) $(id).disabled = !nowItem;
+  $("rmPause").disabled = !nowItem || !nowItem.ready;
+  $("rmPause").textContent = paused ? "▶ Resume" : "❚❚ Pause";
+  $("rmPause").classList.toggle("on", paused && !!nowItem);
+  if (!nowItem) {
+    $("rmTitle").textContent = "Nothing playing";
+    $("rmStatus").textContent = "Add a song below.";
+    $("rmLyrics").disabled = true; $("rmLyrics").textContent = "Lyrics";
+    return;
+  }
+  $("rmTitle").textContent = (nowItem.title || nowItem.video_id) + (nowItem.singer ? ` — ${nowItem.singer}` : "");
+  $("rmStatus").textContent = !nowItem.ready ? stageInfo(nowItem).text : paused ? "Paused on the TV" : "Now playing on the TV";
+  const has = !!nowItem.has_lyrics;
+  const lb = $("rmLyrics");
+  lb.disabled = !has;
+  lb.textContent = !has ? "No lyrics" : showLyrics ? "Lyrics: on" : "Lyrics: off";
+  lb.classList.toggle("on", has && showLyrics);
+}
+$("rmOrig").onclick = () => setPlayer({ mode: "orig" });
+$("rmInst").onclick = () => setPlayer({ mode: "inst" });
+$("rmLyrics").onclick = () => setPlayer({ show_lyrics: !showLyrics });
+$("rmSkip").onclick = () => { if (confirmSkip()) post("/api/next"); };
+$("rmFs").onclick = () => setPlayer({ fullscreen: !fullscreen });
+$("rmPause").onclick = () => setPlayer({ paused: !paused });
+function confirmSkip() {
+  // Two taps within 3 s, so a stray tap on a phone doesn't skip someone's song.
+  const b = $("rmSkip");
+  if (b.dataset.armed) { delete b.dataset.armed; b.textContent = "Skip ›"; return true; }
+  b.dataset.armed = "1"; b.textContent = "Tap again to skip";
+  setTimeout(() => { delete b.dataset.armed; b.textContent = "Skip ›"; }, 3000);
+  return false;
+}
+
+video.addEventListener("play", () => { inst.currentTime = video.currentTime; inst.play().catch(() => {}); });
+video.addEventListener("pause", () => { inst.pause(); });
+video.addEventListener("seeked", () => { inst.currentTime = video.currentTime; });
+video.addEventListener("ratechange", () => { inst.playbackRate = video.playbackRate; });
+video.addEventListener("waiting", () => inst.pause());
+video.addEventListener("playing", () => { inst.currentTime = video.currentTime; inst.play().catch(() => {}); });
+video.addEventListener("ended", () => { if (!advancing) { advancing = true; post("/api/next"); } });
+setInterval(() => {   // drift correction
+  if (!video.paused && inst.src && Math.abs(inst.currentTime - video.currentTime) > 0.08) inst.currentTime = video.currentTime;
+}, 500);
+
+// ---------------- pause (shared with phones) ----------------
+let ignorePauseUntil = 0;
+function applyPaused() {
+  if (isRemote) return;
+  $("pausedBadge").classList.toggle("hidden", !(paused && loadedId));
+  $("playBtn").textContent = paused ? "Play" : "Pause";
+  if (!loadedId) return;
+  if (paused && !video.paused) video.pause();
+  if (!paused && video.paused && !video.ended) video.play().catch(() => {});
+}
+$("playBtn").onclick = () => setPlayer({ paused: !paused });
+// Paused/played on the TV some other way (media keys, picture-in-picture): tell the phones.
+video.addEventListener("pause", () => {
+  if (loadedId && !video.ended && !paused && !isRemote && Date.now() > ignorePauseUntil) setPlayer({ paused: true });
+});
+video.addEventListener("play", () => { if (loadedId && paused && !isRemote) setPlayer({ paused: false }); });
+$("skipBtn").onclick = () => { advancing = true; post("/api/next"); };
+// ---------------- fullscreen ----------------
+// Browsers allow real fullscreen only from a click/tap on this page. So when a
+// phone asks for it, the TV switches to "stage only" (video fills the browser
+// window) and also tries real fullscreen, which works if the browser allows
+// it (e.g. a kiosk setup). With the TV browser in F11 mode it looks the same.
+let fsApplied = null;
+function applyFullscreen() {
+  if (isRemote || fsApplied === fullscreen) return;
+  fsApplied = fullscreen;
+  document.body.classList.toggle("stage-only", fullscreen);
+  $("fsBtn").textContent = fullscreen ? "Exit fullscreen" : "Fullscreen";
+  if (fullscreen && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+  if (!fullscreen && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+$("fsBtn").onclick = () => setPlayer({ fullscreen: !fullscreen });
+// Leaving fullscreen on the TV itself (Esc key, browser UI) updates the phones too.
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && fullscreen) setPlayer({ fullscreen: false });
+});
+document.addEventListener("keydown", (e) => {
+  if (isRemote || e.target.matches("input, select, textarea")) return;
+  if (e.key === "Escape" && fullscreen) setPlayer({ fullscreen: false });
+  if (e.key === "f" || e.key === "F") setPlayer({ fullscreen: !fullscreen });
+});
+$("stage").addEventListener("dblclick", () => { if (started) setPlayer({ fullscreen: !fullscreen }); });
+const setOff = (d) => { offset = Math.round((offset + d) * 100) / 100; $("offVal").textContent = `${offset >= 0 ? "+" : ""}${offset.toFixed(2)} s`; };
+$("offMinus").onclick = () => setOff(-0.1);
+$("offPlus").onclick = () => setOff(0.1);
+
+// ---------------- lyrics: two alternating lines, word-by-word fill ----------------
+function lineHTML(line) {
+  return line.words.map((w) => `<span class="word" data-s="${w.s}" data-e="${w.e}">${esc(w.w)}</span>`).join("");
+}
+
+function frame() {
+  requestAnimationFrame(frame);
+  if (!lyrics.length || loadedId === null) { $("countdown").classList.add("hidden"); return; }
+  const t = video.currentTime - offset;
+  // Active line = the first line that hasn't finished yet.
+  let idx = lyrics.findIndex((l) => l.end + 0.25 > t);
+  if (idx === -1) idx = lyrics.length;
+  if (idx !== lastIdx) {
+    lastIdx = idx;
+    const s = [$("slot0"), $("slot1")];
+    s[0].innerHTML = ""; s[1].innerHTML = "";
+    if (idx < lyrics.length) s[idx % 2].innerHTML = lineHTML(lyrics[idx]);
+    if (idx + 1 < lyrics.length) s[(idx + 1) % 2].innerHTML = lineHTML(lyrics[idx + 1]);
+  }
+  document.querySelectorAll(".word").forEach((el) => {
+    const s = +el.dataset.s, e = +el.dataset.e;
+    const p = t <= s ? 0 : t >= e ? 100 : ((t - s) / Math.max(e - s, 0.01)) * 100;
+    el.style.setProperty("--p", p.toFixed(1) + "%");
+  });
+  // Countdown dots before a line that follows a long instrumental gap.
+  const cd = $("countdown");
+  const next = lyrics[idx];
+  const prevEnd = idx > 0 ? lyrics[idx - 1].end : 0;
+  const left = next ? next.start - t : -1;
+  if (next && next.start - prevEnd >= 4 && left > 0 && left <= 3) {
+    cd.textContent = "●".repeat(Math.ceil(left)); cd.classList.remove("hidden");
+  } else cd.classList.add("hidden");
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
