@@ -109,10 +109,14 @@ def ensure_mdx_model(name: str, models_dir: Path) -> Path:
 
 
 class MDXSeparator:
+    """MDX-Net vocal model. The spectrogram maths (STFT / inverse STFT) is done
+    in NumPy, so this path never loads PyTorch. That matters on Intel Macs:
+    PyTorch and Whisper's engine each bundle Intel's OpenMP runtime, and having
+    both in one process crashes it. It gives the same numbers as torch.stft /
+    torch.istft (center=True, reflect padding, periodic Hann window)."""
+
     def __init__(self, name="Kim_Vocal_2", models_dir: Path = Path("models"), backend="openvino",
                  device="CPU", batch=1, threads=0):
-        import torch
-
         self.file, self.n_fft, self.dim_f, self.dim_t, self.compensate = MDX_MODELS[name]
         path = ensure_mdx_model(name, models_dir)
         self.hop = 1024
@@ -120,7 +124,15 @@ class MDXSeparator:
         self.chunk = self.hop * (self.dim_t - 1)
         self.trim = self.n_fft // 2
         self.gen = self.chunk - 2 * self.trim
-        self.window = torch.hann_window(self.n_fft, periodic=True)
+        # Periodic Hann window (same as torch.hann_window(n, periodic=True)).
+        k = np.arange(self.n_fft)
+        self.window = (0.5 - 0.5 * np.cos(2 * np.pi * k / self.n_fft)).astype(np.float32)
+        # Overlap-added squared window, used to undo the windowing in the inverse STFT.
+        total = self.n_fft + self.hop * (self.dim_t - 1)
+        env = np.zeros(total)
+        for t in range(self.dim_t):
+            env[t * self.hop:t * self.hop + self.n_fft] += self.window ** 2
+        self._env = np.where(env > 1e-11, env, 1.0).astype(np.float32)
         self.batch = max(1, batch)
         self._lock = threading.Lock()
         self.backend = backend
@@ -156,34 +168,42 @@ class MDXSeparator:
                 return self._infer.infer({0: spec})[0][:n].copy()
         return self._sess.run(None, {"input": spec})[0]
 
-    def _stft(self, x):
-        import torch
-        x = x.reshape(-1, self.chunk)
-        s = torch.view_as_real(torch.stft(x, self.n_fft, self.hop, window=self.window, center=True, return_complex=True))
-        s = s.permute(0, 3, 1, 2).reshape(-1, 2, 2, self.n_bins, self.dim_t).reshape(-1, 4, self.n_bins, self.dim_t)
-        return s[:, :, : self.dim_f]
+    def _stft(self, x: np.ndarray) -> np.ndarray:
+        """(B, 2, chunk) audio -> (B, 4, dim_f, dim_t) model input:
+        [left real, left imag, right real, right imag] x frequency x time."""
+        # Single precision, like torch.stft (NumPy 2 computes float32 FFTs natively).
+        x = x.reshape(-1, self.chunk).astype(np.float32)
+        xp = np.pad(x, ((0, 0), (self.trim, self.trim)), mode="reflect")       # center=True
+        frames = np.lib.stride_tricks.sliding_window_view(xp, self.n_fft, axis=-1)[:, ::self.hop]
+        spec = np.fft.rfft(frames * self.window, axis=-1).transpose(0, 2, 1)    # (M, bins, frames)
+        s = np.stack([spec.real, spec.imag], axis=1).reshape(-1, 4, self.n_bins, self.dim_t)
+        return np.ascontiguousarray(s[:, :, : self.dim_f], dtype=np.float32)
 
-    def _istft(self, s):
-        import torch
-        pad = torch.zeros(s.shape[0], 4, self.n_bins - self.dim_f, self.dim_t)
-        s = torch.cat([s, pad], -2).reshape(-1, 2, 2, self.n_bins, self.dim_t).reshape(-1, 2, self.n_bins, self.dim_t)
-        s = torch.view_as_complex(s.permute(0, 2, 3, 1).contiguous())
-        return torch.istft(s, self.n_fft, self.hop, window=self.window, center=True).reshape(-1, 2, self.chunk)
+    def _istft(self, s: np.ndarray) -> np.ndarray:
+        """Inverse of _stft: (B, 4, dim_f, dim_t) -> (B, 2, chunk) audio."""
+        b = s.shape[0]
+        full = np.zeros((b, 4, self.n_bins, self.dim_t), np.float32)
+        full[:, :, : self.dim_f] = s
+        full = full.reshape(-1, 2, self.n_bins, self.dim_t)                   # (M, re/im, bins, frames)
+        spec = (full[:, 0] + 1j * full[:, 1]).astype(np.complex64).transpose(0, 2, 1)   # (M, frames, bins)
+        frames = np.fft.irfft(spec, n=self.n_fft, axis=-1) * self.window       # (M, frames, n_fft)
+        y = np.zeros((frames.shape[0], self._env.shape[0]), frames.dtype)
+        for t in range(self.dim_t):                                            # overlap-add
+            y[:, t * self.hop:t * self.hop + self.n_fft] += frames[:, t]
+        y = (y / self._env)[:, self.trim:self.trim + self.chunk]
+        return y.reshape(b, 2, self.chunk)
 
     def separate(self, mix: np.ndarray, progress=None):
-        import torch
         n = mix.shape[-1]
         pad = self.gen - n % self.gen
-        x = torch.from_numpy(np.concatenate(
-            [np.zeros((2, self.trim), np.float32), mix, np.zeros((2, pad + self.trim), np.float32)], 1))
+        x = np.concatenate([np.zeros((2, self.trim), np.float32), mix, np.zeros((2, pad + self.trim), np.float32)], 1)
         offs = list(range(0, n + pad, self.gen))
         parts = []
         for b in range(0, len(offs), self.batch):
-            chunk = torch.stack([x[:, o:o + self.chunk] for o in offs[b:b + self.batch]])
-            spec = self._stft(chunk).numpy()
-            y = self._istft(torch.from_numpy(self._model(spec)))
+            chunk = np.stack([x[:, o:o + self.chunk] for o in offs[b:b + self.batch]])
+            y = self._istft(self._model(self._stft(chunk)))
             parts.append(y[:, :, self.trim:-self.trim])
             if progress:
                 progress(min((b + self.batch) / len(offs), 1.0))
-        vocals = torch.cat(list(torch.cat(parts)), -1)[:, :n].numpy() * self.compensate
+        vocals = np.concatenate(list(np.concatenate(parts)), axis=-1)[:, :n] * self.compensate
         return vocals.astype(np.float32), (mix - vocals).astype(np.float32)

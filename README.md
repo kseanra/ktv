@@ -64,8 +64,12 @@ fast cores of a hybrid Intel CPU.
 
 Needs **Python 3.11–3.13** on Apple Silicon (M1–M4), or **3.11–3.12** on an
 Intel Mac: the python.org installer or `brew install python@3.12`. ffmpeg is
-included. For YouTube downloads install Deno: `brew install deno` (setup
-offers to do it when Homebrew is present).
+included. YouTube downloads need a JavaScript runtime: setup offers to install
+**Deno** with its official installer (`curl -fsSL https://deno.land/install.sh | sh`,
+a ready-made program for macOS 12 or newer, no Xcode needed). Don't use
+`brew install deno` on macOS 12: Homebrew no longer supports it and tries to
+compile Deno, which demands Xcode 15. Node.js, QuickJS or Bun also work if you
+already have one.
 
 ```zsh
 cd karaoke-prototype
@@ -80,9 +84,16 @@ prints it). Allow incoming connections for Python if macOS asks.
 - Apple Silicon gets the same packages as Windows. Vocal removal and lyrics
   run on the CPU (OpenVINO and Whisper have no Apple GPU support here).
 - Intel Macs install without Demucs (a library it needs has no Intel-Mac
-  build) and with PyTorch 2.2.2 / NumPy 1.26, the last versions for Intel Macs.
-  The default MDX-Net separator works normally.
+  build) and without PyTorch. The default MDX-Net separator doesn't need
+  PyTorch, and keeping it out matters: PyTorch and Whisper each bundle Intel's
+  OpenMP runtime, and having both in the server crashed it ("OMP: Error #15",
+  then a segmentation fault). Re-running `zsh setup.sh` removes a PyTorch an
+  older setup installed.
 - A `.venv` copied over from Windows is set aside and a Mac one is created.
+- HTTPS certificates: Python from python.org has no root certificates of its
+  own, which made downloads fail with `CERTIFICATE_VERIFY_FAILED`. The app now
+  verifies against the macOS Keychain (the `truststore` package). If you still
+  see that error, run *Install Certificates.command* in Applications > Python 3.x.
 
 ### NVIDIA GPU (optional, much faster)
 

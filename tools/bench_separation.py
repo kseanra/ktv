@@ -66,23 +66,28 @@ def main():
     mix = np.ascontiguousarray(mix.T)
     dur = mix.shape[1] / 44100
 
-    import torch
-    has_xpu = hasattr(torch, "xpu") and torch.xpu.is_available()
-    has_cuda = torch.cuda.is_available()
+    try:
+        import torch   # only needed for the Demucs options
+        has_xpu = hasattr(torch, "xpu") and torch.xpu.is_available()
+        has_cuda = torch.cuda.is_available()
+        torch_info = f"torch {torch.__version__} threads={torch.get_num_threads()}"
+    except ImportError:
+        torch, has_xpu, has_cuda, torch_info = None, False, False, "torch not installed (Demucs options skipped)"
     try:
         import openvino as ov
         ov_devices = ov.Core().available_devices
     except Exception:  # noqa: BLE001
         ov_devices = []
-    print(f"excerpt: {dur:.0f}s | torch {torch.__version__} threads={torch.get_num_threads()} "
-          f"cuda={has_cuda} xpu={has_xpu} | openvino devices={ov_devices}\n")
+    print(f"excerpt: {dur:.0f}s | {torch_info} cuda={has_cuda} xpu={has_xpu} | openvino devices={ov_devices}\n")
 
     t = args.threads
     md = ROOT / "data" / "models"
-    options = [
+    options = [] if torch is None else [
         ("1", lambda: DemucsApply("cpu")),
         ("2", lambda: DemucsSeparator(overlap=0.1, batch=1, threads=t)),
         ("3", lambda: DemucsSeparator(overlap=0.1, batch=4, threads=t)),
+    ]
+    options += [
         ("4", lambda: MDXSeparator("Kim_Vocal_2", md, backend="onnxruntime", threads=t)),
         ("5", lambda: MDXSeparator("Kim_Vocal_2", md, backend="openvino", device="CPU", threads=t)),
     ]

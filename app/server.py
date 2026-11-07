@@ -6,8 +6,10 @@ http://<this-pc>:8000/?remote on phones (add songs only).
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import logging
 import re
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -17,7 +19,14 @@ from pydantic import BaseModel
 
 from . import config
 from .jobs import JobManager
-from .pipeline import check_ffmpeg_for_ytdlp, extract_video_id, make_pipeline
+from .pipeline import check_ffmpeg_for_ytdlp, check_js_runtime, extract_video_id, make_pipeline
+
+# If a native library ever crashes the process (e.g. "segmentation fault"),
+# print where it happened instead of exiting silently. Not on Windows: there it
+# also prints errors that libraries trigger and handle on purpose, which would
+# look like crashes but aren't.
+if sys.platform != "win32":
+    faulthandler.enable()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("karaoke")
@@ -47,6 +56,18 @@ async def lifespan(app: FastAPI):
         pass
     except Exception as e:  # noqa: BLE001
         log.error("ffmpeg check FAILED: %s  (downloads will fail until this is fixed)", e)
+    if not config.MOCK:
+        # Separate from the ffmpeg check, so a problem here is reported as itself.
+        try:
+            rt = check_js_runtime()
+            if rt:
+                log.info("JavaScript runtime for YouTube: %s", rt)
+            else:
+                log.warning("no JavaScript runtime found (Deno, Node.js, QuickJS or Bun): YouTube downloads "
+                            "may fail or miss formats. macOS/Linux: curl -fsSL https://deno.land/install.sh | sh  "
+                            "Windows: winget install DenoLand.Deno")
+        except Exception as e:  # noqa: BLE001
+            log.warning("could not check for a JavaScript runtime: %s", e)
     await manager.start()
     if not config.MOCK:
         # Load the vocal separator in the background so the first song doesn't wait for it.

@@ -2,6 +2,22 @@
 import os
 from pathlib import Path
 
+# HTTPS certificates. Python from python.org on macOS ships without trusted root
+# certificates, so downloads fail with CERTIFICATE_VERIFY_FAILED. Verify against
+# the operating system's certificate store instead (macOS Keychain, Windows
+# store), as pip does; fall back to certifi's bundle. An SSL_CERT_FILE you set
+# yourself (e.g. a company proxy certificate) is left alone.
+if not os.environ.get("SSL_CERT_FILE"):
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:  # noqa: BLE001
+        try:
+            import certifi
+            os.environ["SSL_CERT_FILE"] = certifi.where()
+        except ImportError:
+            pass
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("KARAOKE_DATA", ROOT / "data"))
 STATIC_DIR = ROOT / "static"

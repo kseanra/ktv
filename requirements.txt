@@ -1,11 +1,13 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
-yt-dlp>=2025.10.22
+yt-dlp[default]>=2025.10.22   # [default] adds certifi, requests and the YouTube JS helper
 demucs>=4.1
 faster-whisper>=1.1
 soundfile>=0.12
 openvino>=2025.0   # fast vocal separation on Intel CPU / GPU
 imageio-ffmpeg>=0.5   # bundled ffmpeg binary, used when ffmpeg is not on PATH
 numpy
+truststore>=0.9   # use the OS certificate store (fixes HTTPS on python.org Macs)
+certifi
 # torch is pulled in by demucs (CPU build by default).
 # For an NVIDIA GPU, reinstall it from the CUDA index afterwards, see README.

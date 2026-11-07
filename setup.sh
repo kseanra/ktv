@@ -89,52 +89,74 @@ info "installing packages (first time downloads about 1 GB, takes a few minutes)
 if [[ "$ARCH" == arm64 ]]; then
   "$VPY" -m pip install -r requirements.txt
 else
-  # Intel Mac: Demucs 4.1 needs a library with no Intel-Mac build, and the last
-  # Intel-Mac PyTorch (2.2.2) needs NumPy 1.x. MDX-Net (the default) is unaffected.
-  warn "Intel Mac: installing without Demucs (KARAOKE_SEPARATOR=demucs won't be available)."
+  # Intel Mac: Demucs 4.1 needs a library with no Intel-Mac build, so it is
+  # left out, and with it PyTorch. That is deliberate: on Intel Macs PyTorch
+  # and Whisper each bundle Intel's OpenMP runtime, and loading both crashes
+  # the server (OMP Error #15 / segmentation fault). MDX-Net, the default
+  # vocal remover, doesn't need PyTorch.
+  warn "Intel Mac: installing without Demucs/PyTorch (KARAOKE_SEPARATOR=demucs won't be available)."
   tmpreq="$(mktemp "${TMPDIR:-/tmp}/karaoke-req.XXXXXX")"
   grep -v '^demucs' requirements.txt > "$tmpreq"
-  "$VPY" -m pip install -r "$tmpreq" "torch==2.2.2" "numpy<2"
+  "$VPY" -m pip install -r "$tmpreq" "numpy>=2"
   rm -f "$tmpreq"
+  # An earlier version of this script installed PyTorch here; remove it.
+  if "$VPY" -m pip show torch >/dev/null 2>&1; then
+    info "removing PyTorch installed by an earlier setup (not needed on Intel Macs)"
+    "$VPY" -m pip uninstall -y --quiet torch
+  fi
 fi
 
 # ---------------------------------------------------------------- checks
 info "checking the installation"
-"$VPY" - <<'EOF'
-import importlib, subprocess, sys
-mods = ["fastapi", "uvicorn", "yt_dlp", "faster_whisper", "openvino", "torch", "soundfile", "imageio_ffmpeg"]
-bad = []
-for m in mods:
-    try:
-        importlib.import_module(m)
-    except Exception as e:  # noqa: BLE001
-        bad.append(f"{m}: {e}")
-import numpy, torch
-try:
-    torch.from_numpy(numpy.zeros(4, dtype=numpy.float32))      # PyTorch <-> NumPy must work
-except Exception as e:  # noqa: BLE001
-    bad.append(f"torch/numpy: {e}")
-import imageio_ffmpeg
+# Each library is imported in its own process: on Intel Macs, PyTorch and
+# Whisper must never be loaded together (see above).
+mods=(fastapi uvicorn yt_dlp faster_whisper openvino soundfile imageio_ffmpeg truststore certifi)
+[[ "$ARCH" == arm64 ]] && mods+=(torch demucs)
+problems=0
+for m in $mods; do
+  if ! err="$("$VPY" -c "import $m" 2>&1)"; then
+    print "   PROBLEM: $m: ${err##*$'\n'}"; problems=1
+  fi
+done
+"$VPY" - <<'EOF' || problems=1
+import app.config, subprocess, numpy, imageio_ffmpeg, openvino as ov
 exe = imageio_ffmpeg.get_ffmpeg_exe()
-r = subprocess.run([exe, "-version"], capture_output=True, text=True)
-if r.returncode != 0:
-    bad.append(f"ffmpeg at {exe} does not run")
-import openvino as ov
-print(f"   torch {torch.__version__}, numpy {numpy.__version__}, openvino {ov.__version__} devices {ov.Core().available_devices}")
+if subprocess.run([exe, "-version"], capture_output=True).returncode != 0:
+    raise SystemExit(f"   PROBLEM: ffmpeg at {exe} does not run")
+numpy.fft.rfft(numpy.zeros(16, numpy.float32))
+print(f"   numpy {numpy.__version__}, openvino {ov.__version__} devices {ov.Core().available_devices}")
 print(f"   ffmpeg: {exe}")
-if bad:
-    print("\n".join("   PROBLEM: " + b for b in bad)); sys.exit(1)
 EOF
+(( problems == 0 )) || fail "some packages did not install correctly (see PROBLEM lines above)."
 
-# yt-dlp needs a JavaScript runtime for YouTube.
-if ! command -v deno >/dev/null 2>&1; then
-  warn "Deno not found. yt-dlp needs it to download from YouTube."
-  if command -v brew >/dev/null 2>&1 && read -q "?Install Deno with Homebrew now? [y/N] "; then
-    print; brew install deno
+# HTTPS must work (python.org builds have no root certificates; the app uses
+# the macOS Keychain via truststore, this checks that it really works).
+if ! "$VPY" -c 'import app.config, urllib.request; urllib.request.urlopen("https://www.youtube.com", timeout=15)' 2>/dev/null; then
+  warn "HTTPS check to youtube.com failed (no internet, or a certificate problem)."
+  print "   If downloads fail with CERTIFICATE_VERIFY_FAILED, run the 'Install Certificates.command'"
+  print "   in Applications > Python $PYVER, then start the server again."
+else
+  info "HTTPS to youtube.com works"
+fi
+
+# yt-dlp needs a JavaScript runtime for YouTube: Deno (preferred), Node.js,
+# QuickJS or Bun. Deno is installed with its official installer, which
+# downloads a ready-made program (macOS 12+). Homebrew is not used for it:
+# on older macOS versions Homebrew tries to compile Deno and demands Xcode.
+if command -v deno >/dev/null 2>&1 || [[ -x "$HOME/.deno/bin/deno" ]]; then
+  info "Deno found"
+elif command -v node >/dev/null 2>&1 || command -v bun >/dev/null 2>&1 || command -v qjs >/dev/null 2>&1; then
+  info "Node.js / Bun / QuickJS found; yt-dlp will use it (Deno is optional)"
+else
+  warn "no JavaScript runtime found. yt-dlp needs one to download from YouTube."
+  if read -q "?Install Deno now (official installer, into ~/.deno)? [y/N] "; then
+    print
+    curl -fsSL https://deno.land/install.sh | sh -s -- -y --no-modify-path \
+      && info "Deno installed in ~/.deno/bin (the app finds it there)" \
+      || warn "Deno install failed; install it later with: curl -fsSL https://deno.land/install.sh | sh"
   else
     print
-    print "   Install it later with:  brew install deno"
-    print "   or:                     curl -fsSL https://deno.land/install.sh | sh"
+    print "   Install it later with:  curl -fsSL https://deno.land/install.sh | sh"
   fi
 fi
 

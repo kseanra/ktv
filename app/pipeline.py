@@ -69,6 +69,29 @@ def ffmpeg_exe() -> str:
     return _FFMPEG
 
 
+def js_runtimes() -> dict:
+    """JavaScript runtimes yt-dlp may use for YouTube. yt-dlp enables only Deno
+    by default; also allow Node.js, QuickJS and Bun (it picks the best one that
+    is installed), and find Deno in the official installer's folder even when
+    that folder isn't on PATH."""
+    from pathlib import Path as _P
+    deno = {}
+    for cand in (_P.home() / ".deno" / "bin" / "deno", _P.home() / ".deno" / "bin" / "deno.exe"):
+        if cand.exists() and not shutil.which("deno"):
+            deno = {"path": str(cand)}
+    return {"deno": deno, "node": {}, "quickjs": {}, "bun": {}}
+
+
+def check_js_runtime() -> str | None:
+    """Name and version of the JavaScript runtime yt-dlp will use, or None."""
+    import yt_dlp
+    with yt_dlp.YoutubeDL({"quiet": True, "js_runtimes": js_runtimes()}) as ydl:
+        for name, rt in ydl._js_runtimes.items():
+            if rt is not None and rt.info is not None:
+                return f"{rt.info.name} {rt.info.version}"
+    return None
+
+
 def check_ffmpeg_for_ytdlp() -> str:
     """Startup self-test: can yt-dlp merge video + audio with our ffmpeg?"""
     exe = ffmpeg_exe()
@@ -128,14 +151,28 @@ class RealPipeline:
 
     # ---------- model loading (once, shared by all worker threads) ----------
     def device(self) -> str:
+        """Device for Whisper: CUDA if CTranslate2 (Whisper's engine) sees an
+        NVIDIA GPU. Checked without PyTorch, so PyTorch never loads unless
+        Demucs is chosen (on Intel Macs, PyTorch next to Whisper crashes)."""
         if self._device is None:
             if config.DEVICE != "auto":
                 self._device = config.DEVICE
             else:
-                import torch
-                self._device = "cuda" if torch.cuda.is_available() else "cpu"
+                try:
+                    import ctranslate2
+                    self._device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+                except Exception:  # noqa: BLE001
+                    self._device = "cpu"
             log.info("using device: %s", self._device)
         return self._device
+
+    @staticmethod
+    def torch_device() -> str:
+        """Device for Demucs (PyTorch)."""
+        if config.DEVICE != "auto":
+            return config.DEVICE
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
 
     def separator(self):
         with self._lock:
@@ -148,7 +185,7 @@ class RealPipeline:
         from .separators import DemucsSeparator, MDXSeparator
 
         if config.SEPARATOR == "demucs":
-            dev = self.device()
+            dev = self.torch_device()
             return DemucsSeparator(config.DEMUCS_MODEL, dev, overlap=config.DEMUCS_OVERLAP,
                                    batch=1 if dev == "cpu" else 4)
         cpu = MDXSeparator(config.MDX_MODEL, config.MODELS_DIR, backend="openvino", device="CPU")
@@ -187,9 +224,22 @@ class RealPipeline:
             if self._whisper is None:
                 from faster_whisper import WhisperModel
                 dev = self.device()
-                compute = "float16" if dev == "cuda" else "int8"
-                log.info("loading Whisper model %s (%s, %s) ...", config.WHISPER_MODEL, dev, compute)
-                self._whisper = WhisperModel(config.WHISPER_MODEL, device=dev, compute_type=compute)
+                if dev == "cuda":
+                    # An NVIDIA card without NVIDIA's CUDA libraries (cuBLAS/cuDNN)
+                    # is detected but fails on first use. Try it on one second of
+                    # silence and fall back to the CPU if it doesn't work.
+                    try:
+                        log.info("loading Whisper model %s (cuda, float16) ...", config.WHISPER_MODEL)
+                        m = WhisperModel(config.WHISPER_MODEL, device="cuda", compute_type="float16")
+                        import numpy as np
+                        list(m.transcribe(np.zeros(16000, np.float32), language="en")[0])
+                        self._whisper = m
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Whisper can't use the GPU (%s); using the CPU instead", e)
+                        self._device = dev = "cpu"
+                if self._whisper is None:
+                    log.info("loading Whisper model %s (%s, int8) ...", config.WHISPER_MODEL, dev)
+                    self._whisper = WhisperModel(config.WHISPER_MODEL, device=dev, compute_type="int8")
         return self._whisper
 
     # ---------- stage 1: download ----------
@@ -210,7 +260,8 @@ class RealPipeline:
                 d = json.loads(info_file.read_text(encoding="utf-8"))
                 job.title, job.duration = d.get("title", ""), d.get("duration", 0)
             else:
-                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
+                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True,
+                                       "js_runtimes": js_runtimes()}) as ydl:
                     info = ydl.extract_info(job.url, download=False)
                 job.title, job.duration = info.get("title", ""), info.get("duration") or 0
             job.progress = 1.0
@@ -230,6 +281,7 @@ class RealPipeline:
             "quiet": True,
             "no_warnings": True,
             "progress_hooks": [hook],
+            "js_runtimes": js_runtimes(),   # Deno, Node.js, QuickJS or Bun
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(job.url, download=False)
