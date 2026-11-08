@@ -38,7 +38,7 @@ from pathlib import Path
 
 log = logging.getLogger("karaoke.jobs")
 
-STAGES = ["download", "separate", "transcribe"]
+STAGES = ["download", "separate", "transcribe", "voices"]   # "voices" only for duets
 
 
 def _read_json(path: Path) -> dict:
@@ -62,6 +62,8 @@ class Job:
     duration: float = 0.0
     error: str = ""
     has_lyrics: bool = False       # lyrics.json exists and has lines
+    duet: bool = False             # tag lyric lines male / female
+    has_voices: bool = False       # lyrics carry male / female tags
     created: float = field(default_factory=time.time)
     timings: dict = field(default_factory=dict)
 
@@ -79,6 +81,8 @@ class Job:
             "timings": self.timings,
             "skip_lyrics": self.skip_lyrics,
             "has_lyrics": self.has_lyrics,
+            "duet": self.duet,
+            "has_voices": self.has_voices,
             "ready": self.status == "done",
         }
 
@@ -131,40 +135,49 @@ class JobManager:
                 duration=meta.get("duration", 0), language=meta.get("language"),
                 status="done", progress=1.0, timings=meta.get("timings", {}),
                 skip_lyrics=skipped, has_lyrics=has_lyrics,
+                duet=bool(lyrics.get("duet")), has_voices=bool(lyrics.get("duet")),
             )
         log.info("cache: %d songs already processed", len(self.jobs))
 
     # ---------- public API ----------
     def submit(self, video_id: str, url: str, language: str | None, priority: int,
-               skip_lyrics: bool = False) -> Job:
+               skip_lyrics: bool = False, duet: bool = False) -> Job:
+        duet = duet and not skip_lyrics          # voice tags need lyrics
         job = self.jobs.get(video_id)
         if job and job.status != "error":
             # Already cached or in progress: attach to it, maybe raise its priority.
             if language and not job.has_lyrics:
                 job.language = language
+            more_work = False
             if not skip_lyrics and job.skip_lyrics:
-                # Lyrics were skipped before but are wanted now.
-                job.skip_lyrics = False
-                if job.status == "done":
-                    job.priority = priority
-                    self._enqueue(job, self._resume_stage(video_id))
-                    return job
+                job.skip_lyrics = False          # lyrics were skipped before but are wanted now
+                more_work = True
+            if duet and not job.has_voices:
+                job.duet = True                  # an in-progress job picks this up after lyrics
+                more_work = True
+            if more_work and job.status == "done":
+                job.priority = priority
+                self._enqueue(job, self._resume_stage(video_id, want_voices=job.duet))
+                return job
             self.set_priority(video_id, priority)
             return job
         job = Job(video_id=video_id, url=url, language=language or None, priority=priority,
-                  skip_lyrics=skip_lyrics)
+                  skip_lyrics=skip_lyrics, duet=duet)
         self.jobs[video_id] = job
         info = _read_json(self.data_dir / video_id / "info.json")
         job.title, job.duration = info.get("title", ""), info.get("duration", 0)
-        stage = self._resume_stage(video_id)
+        stage = self._resume_stage(video_id, want_voices=duet)
         if stage != "download":
             log.info("resuming %s at %s", video_id, stage)
         self._enqueue(job, stage)
         return job
 
-    def _resume_stage(self, video_id: str) -> str:
+    def _resume_stage(self, video_id: str, want_voices: bool = False) -> str:
         """First stage whose output isn't on disk yet."""
         out = self.data_dir / video_id
+        if (want_voices and (out / "vocals16k.flac").exists()
+                and _read_json(out / "lyrics.json").get("lines")):
+            return "voices"        # lyrics done; only the male/female tags are missing
         if (out / "vocals.wav").exists() and (out / "instrumental.mp3").exists():
             return "transcribe"
         if (out / "video.mp4").exists() and (out / "audio.wav").exists():
@@ -208,6 +221,7 @@ class JobManager:
                 "has_audio": (d / "instrumental.mp3").exists(),
                 "has_lyrics": bool(lyrics.get("lines")),
                 "lyrics_skipped": bool(lyrics.get("skipped")),
+                "duet": bool(lyrics.get("duet")),
                 "status": job.status if job else ("done" if (d / "instrumental.mp3").exists() else "partial"),
                 "last_played": meta.get("last_played", 0),
                 "added": (d / "video.mp4").stat().st_mtime,
@@ -281,6 +295,12 @@ class JobManager:
                 self._finish(job, out_dir)
             elif stage == "transcribe":
                 job.has_lyrics = bool(_read_json(out_dir / "lyrics.json").get("lines"))
+                if job.duet and job.has_lyrics:
+                    self._enqueue(job, "voices")
+                else:
+                    self._finish(job, out_dir)
+            elif stage == "voices":
+                job.has_voices = bool(_read_json(out_dir / "lyrics.json").get("duet"))
                 self._finish(job, out_dir)
             else:
                 self._enqueue(job, STAGES[STAGES.index(stage) + 1])
@@ -289,7 +309,7 @@ class JobManager:
         job.status = "done"
         job.progress = 1.0
         old = _read_json(out_dir / "meta.json")
-        meta = {k: v for k, v in job.public().items() if k in ("url", "title", "duration", "language")}
+        meta = {k: v for k, v in job.public().items() if k in ("url", "title", "duration", "language", "duet")}
         meta["timings"] = {**old.get("timings", {}), **job.timings}
         if "last_played" in old:
             meta["last_played"] = old["last_played"]

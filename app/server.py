@@ -92,6 +92,7 @@ class AddSong(BaseModel):
     language: str | None = None   # e.g. "yue", "zh", "en", "ja", "ko"; empty = auto
     singer: str | None = None
     skip_lyrics: bool = False     # True = only remove vocals (faster), no lyrics
+    duet: bool = False            # male + female duet: tag lyric lines M / F
 
 
 class PlayerUpdate(BaseModel):
@@ -106,6 +107,7 @@ class Process(BaseModel):
     language: str | None = None
     priority: int = 10
     skip_lyrics: bool = False
+    duet: bool = False
 
 
 @app.get("/")
@@ -119,7 +121,7 @@ def add_to_playlist(body: AddSong):
     if not vid:
         raise HTTPException(400, "not a YouTube link")
     job = manager.submit(vid, f"https://www.youtube.com/watch?v={vid}", body.language,
-                         priority=len(playlist), skip_lyrics=body.skip_lyrics)
+                         priority=len(playlist), skip_lyrics=body.skip_lyrics, duet=body.duet)
     playlist.append({"video_id": vid, "singer": (body.singer or "").strip()[:20]})
     reprioritize()
     return {"added": vid, "position": len(playlist) - 1, "job": job.public()}
@@ -187,6 +189,7 @@ def state():
         "queues": manager.queue_depths(),
         "player": player,
         "mock": config.MOCK,
+        "voice_labels": config.VOICE_LABELS,
     }
 
 
@@ -197,7 +200,7 @@ def process(body: Process):
     if not vid:
         raise HTTPException(400, "not a YouTube link")
     return manager.submit(vid, f"https://www.youtube.com/watch?v={vid}", body.language, body.priority,
-                          skip_lyrics=body.skip_lyrics).public()
+                          skip_lyrics=body.skip_lyrics, duet=body.duet).public()
 
 
 @app.delete("/api/songs/{video_id}")

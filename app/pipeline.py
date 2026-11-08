@@ -343,9 +343,10 @@ class RealPipeline:
         model = self.whisper()
         # Decode with our own ffmpeg to 16 kHz mono and pass the samples in
         # directly. (faster-whisper's built-in decoder breaks with PyAV >= 16.)
-        run_ffmpeg("-i", str(out / "vocals.wav"), "-ac", "1", "-ar", "16000", str(out / "vocals16k.wav"))
-        audio, _ = sf.read(out / "vocals16k.wav", dtype="float32")
-        (out / "vocals16k.wav").unlink(missing_ok=True)
+        # 16 kHz mono copy of the vocals. Kept (about 4 MB as FLAC) so duet
+        # voice tags can be added later without redoing vocal removal.
+        run_ffmpeg("-i", str(out / "vocals.wav"), "-ac", "1", "-ar", "16000", str(out / "vocals16k.flac"))
+        audio, _ = sf.read(out / "vocals16k.flac", dtype="float32")
         language = job.language
         if language == "yue" and model.hf_tokenizer.token_to_id("<|yue|>") is None:
             # Only large-v3 models know Cantonese. Smaller ones have no "yue"
@@ -377,6 +378,27 @@ class RealPipeline:
         lyrics = {"language": info.language, "lines": split_lines(segs)}
         (out / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False), encoding="utf-8")
         (out / "vocals.wav").unlink(missing_ok=True)
+
+
+def _tag_voices(job, out: Path, tagger):
+    lyrics = json.loads((out / "lyrics.json").read_text(encoding="utf-8"))
+    job.progress = 0.2
+    info = tagger(lyrics["lines"])
+    lyrics["duet"] = True
+    lyrics["voices"] = info
+    (out / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False), encoding="utf-8")
+    log.info("voice tags for %s: %s", job.video_id, info)
+
+
+def _real_voices(self, job, out: Path):
+    """Stage 4 (duets only): tag each lyric line male / female from pitch."""
+    import soundfile as sf
+    from .voices import tag_lines
+    audio, _ = sf.read(out / "vocals16k.flac", dtype="float32")
+    _tag_voices(job, out, lambda lines: tag_lines(audio, lines))
+
+
+RealPipeline.voices = _real_voices
 
 
 class MockPipeline:
@@ -422,6 +444,20 @@ class MockPipeline:
         lyrics = {"language": "en", "lines": split_lines([{"words": words}], max_words=8)}
         (out / "lyrics.json").write_text(json.dumps(lyrics), encoding="utf-8")
         (out / "vocals.wav").unlink(missing_ok=True)
+        (out / "vocals16k.flac").write_bytes(b"")   # stands in for the kept 16 kHz vocals
+
+
+def _mock_voices(self, job, out: Path):
+    self._sleep(job, 1)
+
+    def tag(lines):
+        for i, ln in enumerate(lines):
+            ln["voice"] = "M" if (i // 2) % 2 == 0 else "F"
+        return {"tagged": len(lines), "mock": True}
+    _tag_voices(job, out, tag)
+
+
+MockPipeline.voices = _mock_voices
 
 
 def make_pipeline():

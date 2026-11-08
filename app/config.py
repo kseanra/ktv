@@ -52,6 +52,9 @@ MAX_DURATION = int(os.environ.get("KARAOKE_MAX_DURATION", "600"))
 # Video height to download. 720 keeps files small; 1080 also works.
 MAX_HEIGHT = int(os.environ.get("KARAOKE_MAX_HEIGHT", "720"))
 
+# Labels shown on the TV for duet voice tags (male, female), e.g. "男,女".
+VOICE_LABELS = (os.environ.get("KARAOKE_VOICE_LABELS", "M,F").split(",") + ["M", "F"])[:2]
+
 # KARAOKE_MOCK=1 replaces download + models with fake but realistic stages,
 # so the queue and player can be tried without YouTube access or model weights.
 MOCK = os.environ.get("KARAOKE_MOCK", "0") == "1"

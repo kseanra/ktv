@@ -115,6 +115,16 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
 - **Skip lyrics**: tick it before adding a song to only remove the vocals
   (saves the lyrics step). It applies to that one song and unticks itself. The vocals are kept, so adding the song again with
   the box unticked extracts the lyrics later, without redoing anything else.
+- **Male + female duet**: tick it when adding a duet and each lyric line gets
+  an **M** or **F** tag, with male lines filling blue and female lines pink.
+  It works from pitch alone (see `app/voices.py`): the song's two voice
+  ranges are found automatically, then each line goes to whichever singer's
+  evidence is stronger. Expect roughly 6-8 of 10 lines right: a man's high
+  chorus lines and a woman's low verse lines can get the other tag, and lines
+  sung together get one of the two. Adding a finished song again from History
+  with the box ticked only runs the tagging (about 2 s), because a small copy
+  of the vocals (`vocals16k.flac`, ~4 MB) is kept. Labels can be changed, e.g.
+  `set KARAOKE_VOICE_LABELS=男,女`.
 - **History** tab: every song downloaded so far, newest played first, with a
   search box. *+ Add* puts it back in the playlist; finished songs are ready
   instantly.
@@ -191,7 +201,7 @@ lyrics run early or late.
 
 | Method | Path | |
 |---|---|---|
-| POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?}` add to playlist (`url` may be a bare video ID) |
+| POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?}` add to playlist (`url` may be a bare video ID) |
 | POST | `/api/next` | finish current song |
 | POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?}` TV audio mode / lyrics / fullscreen / pause |
 | POST | `/api/playlist/{i}/remove`, `/up` | edit playlist |

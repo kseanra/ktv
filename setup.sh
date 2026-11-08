@@ -118,7 +118,10 @@ for m in $mods; do
     print "   PROBLEM: $m: ${err##*$'\n'}"; problems=1
   fi
 done
-"$VPY" - <<'EOF' || problems=1
+# Run as "python -c" rather than feeding the script on stdin: importing
+# OpenVINO starts a side process (its telemetry), and on macOS a side process
+# re-runs the main script from its file, which fails for "<stdin>".
+check_code="$(cat <<'EOF'
 import app.config, subprocess, numpy, imageio_ffmpeg, openvino as ov
 exe = imageio_ffmpeg.get_ffmpeg_exe()
 if subprocess.run([exe, "-version"], capture_output=True).returncode != 0:
@@ -127,6 +130,8 @@ numpy.fft.rfft(numpy.zeros(16, numpy.float32))
 print(f"   numpy {numpy.__version__}, openvino {ov.__version__} devices {ov.Core().available_devices}")
 print(f"   ffmpeg: {exe}")
 EOF
+)"
+"$VPY" -c "$check_code" || problems=1
 (( problems == 0 )) || fail "some packages did not install correctly (see PROBLEM lines above)."
 
 # HTTPS must work (python.org builds have no root certificates; the app uses

@@ -31,6 +31,10 @@
             filter: drop-shadow(0 2px 0 #000) drop-shadow(0 0 6px rgba(0,0,0,.9)); }
   .slot { font-size: clamp(20px, 3.3vw, 56px); font-weight: 800; line-height: 1.35; min-height: 1.35em; }
   .slot.top { text-align: left; } .slot.bottom { text-align: right; }
+  .v-M { --sung: #57b8ff; } .v-F { --sung: #ff6fb3; }    /* duet: male blue, female pink */
+  .vtag { display: inline-block; font-size: .55em; font-weight: 800; padding: .08em .4em; margin-right: .35em;
+          border-radius: .3em; vertical-align: .35em; color: #0b0a10; line-height: 1.2; }
+  .vtag-M { background: #57b8ff; } .vtag-F { background: #ff6fb3; }
   .word { --p: 0%; background: linear-gradient(90deg, var(--sung) var(--p), var(--unsung) var(--p));
           -webkit-background-clip: text; background-clip: text; color: transparent; white-space: pre-wrap; }
   .countdown { position: absolute; left: 6%; bottom: calc(6% + 2 * clamp(20px, 3.3vw, 56px) * 1.35 + 8px);
@@ -197,6 +201,7 @@
         </select>
       </div>
       <label class="check"><input type="checkbox" id="skipLyrics"> Skip lyrics for this song (faster: vocal removal only)</label>
+      <label class="check" id="duetLabel"><input type="checkbox" id="duet"> Male + female duet: tag lines M / F</label>
       <button class="primary" type="submit">Add to playlist</button>
       <div class="msg" id="msg"></div>
     </form>
@@ -240,6 +245,10 @@ const pref = {
 // "Skip lyrics" applies to the next song added only: it unticks itself after
 // each add and isn't remembered, so it can't silently skip every later song.
 $("skipLyrics").checked = false;
+$("duet").checked = false;
+// A duet needs lyrics, so the two options exclude each other.
+$("skipLyrics").addEventListener("change", () => { if ($("skipLyrics").checked) $("duet").checked = false; });
+$("duet").addEventListener("change", () => { if ($("duet").checked) $("skipLyrics").checked = false; });
 
 async function addSong(url) {
   const msg = $("msg");
@@ -248,12 +257,13 @@ async function addSong(url) {
     const r = await fetch("/api/queue", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, singer: $("singer").value, language: $("lang").value || null,
-                             skip_lyrics: $("skipLyrics").checked }),
+                             skip_lyrics: $("skipLyrics").checked, duet: $("duet").checked }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "failed");
     const j = data.job;
     $("skipLyrics").checked = false;
+    $("duet").checked = false;
     msg.textContent = j.ready ? `Added: ${j.title || "song"} is ready to sing.`
       : !j.skip_lyrics && j.status.includes("transcribe") ? "Added. Extracting lyrics in the background."
       : "Added. Processing in the background.";
@@ -301,6 +311,7 @@ function renderHistory() {
       <div><div class="t" title="${esc(h.title)}">${esc(h.title || h.video_id)}</div>
         <div class="m">${fmtDur(h.duration) ? `<span>${fmtDur(h.duration)}</span>` : ""}${lyr}
           ${!h.has_audio ? `<span class="tag no">not processed</span>` : ""}
+          ${h.duet ? `<span class="tag in" title="Lines tagged male / female">duet M/F</span>` : ""}
           ${busy ? `<span class="tag in">processing</span>` : ""}
           ${h.in_playlist ? `<span class="tag in">in playlist</span>` : ""}</div></div>
       <div class="hbtns">
@@ -354,14 +365,14 @@ function redraw() { if (lastState) render(lastState); renderHistory(); }
 
 // ---------------- playlist + status ----------------
 const STAGES = ["download", "separate", "transcribe"];
-const LABEL = { download: "Downloading video", separate: "Removing vocals", transcribe: "Extracting lyrics" };
+const LABEL = { download: "Downloading video", separate: "Removing vocals", transcribe: "Extracting lyrics", voices: "Tagging male / female" };
 
 function stageInfo(it) {
   if (!it.status) return { text: "unknown", cls: "" };
   if (it.status === "done") return { text: it.has_lyrics ? "Ready" : "Ready · no lyrics", cls: "ok", done: 3 };
   if (it.status === "error") return { text: it.error, cls: "err", done: 0 };
   const [kind, stage] = it.status.split(":");
-  const idx = STAGES.indexOf(stage);
+  const idx = stage === "voices" ? 2 : STAGES.indexOf(stage);   // voices shares the lyrics bar
   let text = kind === "waiting" ? `Waiting for ${stage} worker` : `${LABEL[stage]} ${Math.round(it.progress * 100)}%`;
   if (it.skip_lyrics) text += " · lyrics skipped";
   return { text, cls: "", done: idx, stage: idx, progress: kind === "running" ? it.progress : 0 };
@@ -401,6 +412,7 @@ function render(state) {
 
   nowItem = state.playlist[0] || null;
   applyPlayerState(state.player);
+  if (state.voice_labels) voiceLabels = state.voice_labels;
   renderNowCard();
   if (!isRemote) syncPlayer(state.playlist[0]);
 }
@@ -438,6 +450,7 @@ function syncPlayer(cur) {
   if (cur.video_id === loadedId) {
     // Lyrics finished while the song was already playing: pick them up.
     if (cur.has_lyrics && !lyrics.length && !fetchingLyrics) loadLyrics(cur.video_id);
+    else if (cur.has_voices && lyrics.length && !lyrics.some((l) => l.voice) && !fetchingLyrics) loadLyrics(cur.video_id);
     return;
   }
   if (!cur.ready) {
@@ -642,8 +655,13 @@ $("offMinus").onclick = () => setOff(-0.1);
 $("offPlus").onclick = () => setOff(0.1);
 
 // ---------------- lyrics: two alternating lines, word-by-word fill ----------------
+let voiceLabels = ["M", "F"];
 function lineHTML(line) {
-  return line.words.map((w) => `<span class="word" data-s="${w.s}" data-e="${w.e}">${esc(w.w)}</span>`).join("");
+  const words = line.words.map((w) => `<span class="word" data-s="${w.s}" data-e="${w.e}">${esc(w.w)}</span>`).join("");
+  if (!line.voice) return words;
+  // Duet: a coloured tag in front, and the line fills in that singer's colour.
+  const label = line.voice === "M" ? voiceLabels[0] : voiceLabels[1];
+  return `<span class="v-${line.voice}"><span class="vtag vtag-${line.voice}">${esc(label)}</span>${words}</span>`;
 }
 
 function frame() {
