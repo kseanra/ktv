@@ -470,7 +470,7 @@ def _thumb(vid: str) -> str:
     return f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"
 
 
-def search_youtube(query: str, limit: int = 10) -> list[dict]:
+def search_youtube(query: str, limit: int = 30) -> list[dict]:
     """Top YouTube results for a text search, without downloading anything.
     Uses yt-dlp's "ytsearch" (no API key). Live streams and videos longer than
     MAX_DURATION are left out."""

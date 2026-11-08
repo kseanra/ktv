@@ -290,7 +290,7 @@ async def delete_song(video_id: str):
 
 
 @app.get("/api/search")
-async def search(q: str, limit: int = 10):
+async def search(q: str, limit: int = 30):
     """Search YouTube by song name. Each result says whether that song is
     already processed (ready to sing) or already in the playlist."""
     q = q.strip()
@@ -298,7 +298,7 @@ async def search(q: str, limit: int = 10):
         return []
     try:
         results = await asyncio.get_running_loop().run_in_executor(
-            None, search_youtube, q, max(1, min(limit, 20)))
+            None, search_youtube, q, max(1, min(limit, 50)))
     except Exception as e:  # noqa: BLE001
         log.warning("search failed for %r: %s", q, e)
         raise HTTPException(502, "YouTube search failed. Check the internet connection, or update yt-dlp.")

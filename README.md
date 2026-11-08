@@ -153,7 +153,7 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   address, not `localhost`. If it picks the wrong one (e.g. with a VPN), set
   `KARAOKE_PUBLIC_URL=http://192.168.x.x:8000`.
 - **Search YouTube by song name**: type a song name (instead of a link) in
-  the add box and press *Search YouTube*. The top 10 results show with
+  the add box and press *Search YouTube*. The top 30 results show with
   thumbnail, channel, length and views; **+ Add** opens the usual Add popup.
   Results marked *ready* were processed before and play straight away.
   Pasting a link still adds it directly. Search uses yt-dlp (no API key);
@@ -239,7 +239,7 @@ lyrics run early or late.
 | GET | `/api/state` | playlist + queue status (the page polls this every second) |
 | POST | `/api/process` | `{url, language?, priority?, skip_lyrics?}` process without the playlist |
 | GET | `/api/join`, `/qr.svg?start=1\|0` | address phones should open, and its QR code (start=1 also starts the TV) |
-| GET | `/api/search?q=...&limit=10` | YouTube search: `[{video_id, title, channel, duration, views, thumbnail, ready, in_playlist}]` |
+| GET | `/api/search?q=...&limit=30` | YouTube search: `[{video_id, title, channel, duration, views, thumbnail, ready, in_playlist}]` |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |
 | GET | `/api/jobs`, `/api/jobs/{id}` | job status |

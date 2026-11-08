@@ -437,7 +437,11 @@ const isLink = (v) => /(?:v=|\/shorts\/|\/embed\/|\/live\/|youtu\.be\/)[A-Za-z0-
 function updateSubmitLabel() {
   $("addSubmit").textContent = isLink($("url").value.trim()) ? "Add to playlist" : "Search YouTube";
 }
-$("url").addEventListener("input", updateSubmitLabel);
+// Emptying the box (typing it away, or its ✕ clear button) also clears the results.
+$("url").addEventListener("input", () => {
+  updateSubmitLabel();
+  if (!$("url").value.trim()) clearResults();
+});
 
 $("addForm").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -500,7 +504,13 @@ $("resultsList").addEventListener("click", (e) => {
   const r = results[+b.dataset.ri]; if (!r) return;
   openAddModal(r.video_id, r.title || r.video_id, (ok) => { if (ok) { r.in_playlist = true; renderResults(); } });
 });
-$("resultsClose").onclick = () => { ++searchSeq; results = []; $("searchResults").classList.add("hidden"); $("addSubmit").disabled = false; };
+function clearResults() {
+  ++searchSeq;                              // a search still running is ignored
+  results = []; $("resultsList").innerHTML = "";
+  $("searchResults").classList.add("hidden");
+  $("addSubmit").disabled = false;
+}
+$("resultsClose").onclick = clearResults;
 
 // ---------------- tabs + history ----------------
 let currentTab = "playlist", histItems = [];
