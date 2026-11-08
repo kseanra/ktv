@@ -112,10 +112,11 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
 
 ## Using it
 
-- **Skip lyrics**: tick it before adding a song to only remove the vocals
-  (saves the lyrics step). It applies to that one song and unticks itself. The vocals are kept, so adding the song again with
+- **Adding a song**: *Add to playlist* (or *+ Add* in History) opens a popup
+  with two options, then *Add* adds it:
+  - **Skip lyrics**: only remove the vocals (saves the lyrics step). The vocals are kept, so adding the song again with
   the box unticked extracts the lyrics later, without redoing anything else.
-- **Male + female duet**: tick it when adding a duet and each lyric line gets
+  - **Male + female duet**: each lyric line gets
   an **M** or **F** tag, with male lines filling blue and female lines pink.
   It works from pitch alone (see `app/voices.py`): the song's two voice
   ranges are found automatically, then each line goes to whichever singer's
@@ -133,8 +134,24 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   History removes the song's files from `data\` for good, after a second tap
   to confirm, and takes it off the playlist. A song that is being processed
   right now can't be deleted until it finishes.
+- **Lyrics size**: **A− / A+** on the TV's player bar or the phone card, 50% to
+  300% in 10% steps (default 120%). Shared like the other TV settings.
 - **Lyrics: on/off** (player bar) hides the lyrics; it shows *No lyrics* for
   songs without them.
+- **Starting the TV player**: browsers only play sound after a click on the
+  page, so the TV shows *Start player*. You can also start it from a phone
+  (*▶ Start TV player* on the phone card). If the TV browser blocks sound, a
+  phone start plays muted and the TV shows "click or press a key on the TV
+  once" to turn sound on. To skip all that, start the TV browser with
+  `--autoplay-policy=no-user-gesture-required` (Chrome and Edge; see the
+  kiosk commands below): the TV then starts by itself, with sound.
+- **Joining from a phone**: the TV's start screen and idle screen show a QR
+  code (and the address) for phones to scan. Scanning it also starts the TV
+  player (the code's address ends in `?start=1`); typing the address shown
+  under it just joins. On a phone, **Invite** (top right) shows a big QR code
+  for others to scan; that one only joins, it doesn't start the TV. It uses this computer's network
+  address, not `localhost`. If it picks the wrong one (e.g. with a VPN), set
+  `KARAOKE_PUBLIC_URL=http://192.168.x.x:8000`.
 - **Phones and tablets always get the phone view** (add songs + remote control),
   never the player. Add `?tv` to the address to use a tablet as the screen, or
   `?remote` to force the phone view on a PC.
@@ -146,7 +163,8 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   page itself, so from a phone the TV switches to a full-window view (video
   fills the browser, panels hidden). Put the TV browser in fullscreen once with
   **F11**, or start it in kiosk mode (`msedge --kiosk http://localhost:8000
-  --edge-kiosk-type=fullscreen`, or `chrome --kiosk http://localhost:8000`),
+  --edge-kiosk-type=fullscreen --autoplay-policy=no-user-gesture-required`, or
+  `chrome --kiosk --autoplay-policy=no-user-gesture-required http://localhost:8000`),
   and it looks exactly like fullscreen. On the TV: **F** toggles, **Esc**
   exits, or double-click the video.
 
@@ -203,10 +221,11 @@ lyrics run early or late.
 |---|---|---|
 | POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?}` add to playlist (`url` may be a bare video ID) |
 | POST | `/api/next` | finish current song |
-| POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?}` TV audio mode / lyrics / fullscreen / pause |
+| POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size |
 | POST | `/api/playlist/{i}/remove`, `/up` | edit playlist |
 | GET | `/api/state` | playlist + queue status (the page polls this every second) |
 | POST | `/api/process` | `{url, language?, priority?, skip_lyrics?}` process without the playlist |
+| GET | `/api/join`, `/qr.svg?start=1\|0` | address phones should open, and its QR code (start=1 also starts the TV) |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |
 | GET | `/api/jobs`, `/api/jobs/{id}` | job status |

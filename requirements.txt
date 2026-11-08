@@ -9,5 +9,6 @@ imageio-ffmpeg>=0.5   # bundled ffmpeg binary, used when ffmpeg is not on PATH
 numpy
 truststore>=0.9   # use the OS certificate store (fixes HTTPS on python.org Macs)
 certifi
+segno>=1.6   # QR code on the TV for phones to join (pure Python)
 # torch is pulled in by demucs (CPU build by default).
 # For an NVIDIA GPU, reinstall it from the CUDA index afterwards, see README.

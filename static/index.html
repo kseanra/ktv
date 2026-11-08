@@ -29,7 +29,8 @@
   .stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   .lyrics { position: absolute; left: 0; right: 0; bottom: 6%; padding: 0 6%; pointer-events: none;
             filter: drop-shadow(0 2px 0 #000) drop-shadow(0 0 6px rgba(0,0,0,.9)); }
-  .slot { font-size: clamp(20px, 3.3vw, 56px); font-weight: 800; line-height: 1.35; min-height: 1.35em; }
+  /* --lyr-scale is the shared lyrics size (A- / A+ on the TV or a phone). */
+  .slot { font-size: calc(clamp(20px, 3.3vw, 56px) * var(--lyr-scale, 1.2)); font-weight: 800; line-height: 1.35; min-height: 1.35em; }
   .slot.top { text-align: left; } .slot.bottom { text-align: right; }
   .v-M { --sung: #57b8ff; } .v-F { --sung: #ff6fb3; }    /* duet: male blue, female pink */
   .vtag { display: inline-block; font-size: .55em; font-weight: 800; padding: .08em .4em; margin-right: .35em;
@@ -37,13 +38,19 @@
   .vtag-M { background: #57b8ff; } .vtag-F { background: #ff6fb3; }
   .word { --p: 0%; background: linear-gradient(90deg, var(--sung) var(--p), var(--unsung) var(--p));
           -webkit-background-clip: text; background-clip: text; color: transparent; white-space: pre-wrap; }
-  .countdown { position: absolute; left: 6%; bottom: calc(6% + 2 * clamp(20px, 3.3vw, 56px) * 1.35 + 8px);
+  .countdown { position: absolute; left: 6%; bottom: calc(6% + 2 * clamp(20px, 3.3vw, 56px) * var(--lyr-scale, 1.2) * 1.35 + 8px);
                color: var(--sung); font-size: clamp(16px, 2.4vw, 32px); letter-spacing: .3em; }
   .overlay { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
              background: radial-gradient(circle at 50% 40%, #241a33, #0b0a10 70%); padding: 24px; }
   .overlay h2 { margin: 0 0 8px; font-size: clamp(22px, 3vw, 40px); }
   .overlay p { color: var(--dim); margin: 6px 0; }
   .hidden { display: none !important; }
+  .join { display: flex; gap: 18px; align-items: center; justify-content: center; margin-top: 22px; text-align: left; }
+  .join .qr { width: clamp(110px, 24vh, 230px); height: auto; aspect-ratio: 1; background: #fff; border-radius: 12px; padding: 6px; }
+  .join .jtext { display: flex; flex-direction: column; gap: 4px; }
+  .join .jtext b { font-size: clamp(16px, 2vw, 26px); }
+  .join .jtext span { color: var(--dim); font-size: 14px; }
+  .join .joinUrl { font-size: clamp(14px, 1.6vw, 22px); color: var(--sung); margin-top: 6px; }
   .bigbar { width: min(420px, 70vw); height: 8px; background: #2a2634; border-radius: 99px; overflow: hidden; margin: 14px auto 0; }
   .bigbar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
 
@@ -58,6 +65,28 @@
   .side { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .side header { padding: 16px; border-bottom: 1px solid var(--line); }
   .side h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .invite { display: none; margin-left: auto; padding: 6px 12px; font-size: 14px; font-weight: 600; }
+  body.remote .invite { display: inline-block; }
+  .modal { position: fixed; inset: 0; z-index: 50; background: rgba(5, 4, 9, .97); display: grid; place-items: center; padding: 16px; }
+  .modal-card { width: min(420px, 100%); text-align: center; display: grid; gap: 12px; justify-items: center; }
+  .modal-card h2 { margin: 0; font-size: 22px; }
+  .modal-card img { width: min(84vw, 340px); aspect-ratio: 1; background: #fff; border-radius: 16px; padding: 10px; }
+  .modal-card .joinUrl { font-size: 17px; color: var(--sung); overflow-wrap: anywhere; }
+  .modal-card p { margin: 0; color: var(--dim); font-size: 14px; }
+  .modal-card button { padding: 12px 28px; font-size: 16px; }
+  .addcard { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px;
+             justify-items: stretch; text-align: left; width: min(440px, 100%); }
+  .addcard h2 { text-align: center; }
+  .addwhat { font-size: 14px; color: var(--dim); text-align: center; overflow-wrap: anywhere;
+             display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .check.opt { align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+               color: var(--text); font-size: 15px; }
+  .check.opt:has(input:checked) { border-color: var(--accent); background: #24121c; }
+  .check.opt input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+  .check.opt span { display: grid; gap: 2px; }
+  .check.opt small { color: var(--dim); font-size: 13px; }
+  .addbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+  .addbtns button { width: 100%; }
   .badge { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: #3a2a10; color: var(--sung); font-weight: 600; }
   form { display: grid; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -112,7 +141,14 @@
   .nc-controls > * { flex: 0 0 auto; max-width: 100%; }
   .nc-controls button { padding: 10px 14px; white-space: nowrap; }
   .nc-controls .toggle { display: inline-flex; }
+  .sizegrp { display: inline-flex; align-items: center; gap: 6px; }
+  .sizegrp .pct { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--dim); font-size: 13px; }
   #rmPause.on { background: var(--sung); border-color: var(--sung); color: #1a1400; font-weight: 600; }
+  .soundBanner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 10px 18px;
+                 border-radius: 10px; background: rgba(255, 207, 63, .95); color: #1a1400; font-weight: 700;
+                 font-size: clamp(14px, 1.6vw, 20px); text-align: center; max-width: 90%; }
+  #rmStart { padding: 14px; font-size: 17px; }
+  .nc-warn { font-size: 13px; color: var(--sung); }
   .pausedBadge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 14px 28px;
                  border-radius: 14px; background: rgba(0,0,0,.65); color: #fff; font-size: clamp(20px, 3vw, 44px);
                  font-weight: 800; letter-spacing: .08em; pointer-events: none; }
@@ -140,6 +176,7 @@
       <audio id="inst" preload="auto"></audio>
       <div class="countdown hidden" id="countdown"></div>
       <div class="pausedBadge hidden" id="pausedBadge">❚❚ Paused</div>
+      <div class="soundBanner hidden" id="soundBanner">🔇 Sound is blocked by the browser: click or press a key on the TV once</div>
       <div class="lyrics"><div class="slot top" id="slot0"></div><div class="slot bottom" id="slot1"></div></div>
 
       <div class="overlay" id="startOverlay">
@@ -147,14 +184,21 @@
           <h2>Karaoke player</h2>
           <p>Browsers block sound until you click once.</p>
           <p style="margin-top:18px"><button class="primary" id="startBtn">Start player</button></p>
-          <p id="joinHint" style="margin-top:18px;font-size:14px"></p>
+          <div class="join">
+            <img class="qr" src="/qr.svg" alt="QR code to join" onerror="this.remove()">
+            <div class="jtext"><b>Scan to join</b><span>starts the TV, then add songs &amp; control it</span><code class="joinUrl"></code></div>
+          </div>
         </div>
       </div>
       <div class="overlay hidden" id="waitOverlay">
         <div>
           <h2 id="waitTitle">No song queued</h2>
-          <p id="waitText">Paste a YouTube link on the right, or open this address on a phone.</p>
+          <p id="waitText">Paste a YouTube link on the right, or scan the code with a phone.</p>
           <div class="bigbar hidden" id="waitBarWrap"><div id="waitBar"></div></div>
+          <div class="join">
+            <img class="qr" src="/qr.svg" alt="QR code to join" onerror="this.remove()">
+            <div class="jtext"><b>Scan to join</b><span>starts the TV, then add songs &amp; control it</span><code class="joinUrl"></code></div>
+          </div>
         </div>
       </div>
     </div>
@@ -163,6 +207,7 @@
         <button id="modeOrig">Original</button><button id="modeInst" class="on">Backing track</button>
       </div>
       <button id="lyrBtn" title="Show or hide the lyrics">Lyrics: on</button>
+      <span class="sizegrp" title="Lyrics size"><button id="lyrSmaller">A−</button><span class="pct" id="lyrSize">120%</span><button id="lyrBigger">A+</button></span>
       <button id="offMinus" title="Lyrics earlier">−</button>
       <span class="offset" id="offVal">0.00 s</span>
       <button id="offPlus" title="Lyrics later">+</button>
@@ -174,15 +219,19 @@
   </section>
 
   <aside class="side">
-    <header><h1>Karaoke prototype <span class="badge hidden" id="mockBadge">MOCK MODE</span></h1></header>
+    <header><h1>Karaoke prototype <span class="badge hidden" id="mockBadge">MOCK MODE</span>
+      <button id="inviteBtn" class="invite" title="Show a QR code so others can join">Invite</button></h1></header>
     <div class="nowcard hidden" id="nowCard">
       <div class="nc-label">On the TV</div>
+      <button id="rmStart" class="primary hidden">▶ Start TV player</button>
+      <div class="nc-warn hidden" id="rmWarn">🔇 The TV's sound is blocked by its browser: click or press a key on the TV once.</div>
       <div class="nc-title" id="rmTitle"></div>
       <div class="nc-status" id="rmStatus"></div>
       <div class="nc-controls">
         <button id="rmPause">❚❚ Pause</button>
         <div class="toggle"><button id="rmOrig">Original</button><button id="rmInst" class="on">Backing track</button></div>
         <button id="rmLyrics">Lyrics: on</button>
+        <span class="sizegrp" title="Lyrics size on the TV"><button id="rmLyrSmaller">A−</button><span class="pct" id="rmLyrSize">120%</span><button id="rmLyrBigger">A+</button></span>
         <button id="rmFs">TV fullscreen</button>
         <button id="rmSkip">Skip ›</button>
       </div>
@@ -200,8 +249,6 @@
           <option value="ko">Korean</option>
         </select>
       </div>
-      <label class="check"><input type="checkbox" id="skipLyrics"> Skip lyrics for this song (faster: vocal removal only)</label>
-      <label class="check" id="duetLabel"><input type="checkbox" id="duet"> Male + female duet: tag lines M / F</label>
       <button class="primary" type="submit">Add to playlist</button>
       <div class="msg" id="msg"></div>
     </form>
@@ -219,6 +266,27 @@
     </div>
     <a class="tvlink" id="tvLink" href="/?tv">Use this device as the TV screen</a>
   </aside>
+</div>
+
+<div class="modal hidden" id="addModal" role="dialog" aria-label="Add song">
+  <div class="modal-card addcard">
+    <h2>Add song</h2>
+    <div class="addwhat" id="addWhat"></div>
+    <label class="check opt"><input type="checkbox" id="skipLyrics">
+      <span><b>Skip lyrics</b><small>Faster: vocal removal only, no lyrics on the TV</small></span></label>
+    <label class="check opt"><input type="checkbox" id="duet">
+      <span><b>Male + female duet</b><small>Tag each lyric line M or F</small></span></label>
+    <div class="addbtns"><button id="addCancel" type="button">Cancel</button><button class="primary" id="addConfirm" type="button">Add</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="qrModal" role="dialog" aria-label="Invite QR code">
+  <div class="modal-card">
+    <h2>Scan to join</h2>
+    <img id="qrModalImg" alt="QR code to join">
+    <code class="joinUrl"></code>
+    <p>Point a phone camera at the code to add songs and control the TV.</p>
+    <button id="qrClose">Close</button>
+  </div>
 </div>
 
 <script>
@@ -272,9 +340,40 @@ async function addSong(url) {
   } catch (err) { msg.className = "msg err"; msg.textContent = err.message; return false; }
 }
 
-$("addForm").addEventListener("submit", async (e) => {
+// ---------------- "Add song" popup ----------------
+// Both "Add to playlist" and History's "+ Add" open it; the song is added only
+// when "Add" is pressed, with the options chosen there.
+let pendingAdd = null;   // {url, onAdded}
+const YT_ID = /(?:v=|\/shorts\/|\/embed\/|\/live\/|youtu\.be\/)([A-Za-z0-9_-]{11})|^([A-Za-z0-9_-]{11})$/;
+
+function openAddModal(url, label, onAdded) {
+  pendingAdd = { url, onAdded };
+  $("addWhat").textContent = label;
+  $("skipLyrics").checked = false; $("duet").checked = false;
+  $("addModal").classList.remove("hidden");
+  $("addConfirm").focus();
+}
+function closeAddModal() { $("addModal").classList.add("hidden"); pendingAdd = null; }
+
+$("addConfirm").onclick = async () => {
+  if (!pendingAdd) return;
+  const { url, onAdded } = pendingAdd;
+  $("addConfirm").disabled = true;
+  const ok = await addSong(url);          // reads the two options before they're reset
+  $("addConfirm").disabled = false;
+  closeAddModal();
+  if (onAdded) onAdded(ok);
+};
+$("addCancel").onclick = closeAddModal;
+$("addModal").addEventListener("click", (e) => { if (e.target === $("addModal")) closeAddModal(); });
+
+$("addForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  if (await addSong($("url").value)) $("url").value = "";
+  const url = $("url").value.trim();
+  const m = url.match(YT_ID);
+  if (!m) { $("msg").className = "msg err"; $("msg").textContent = "That doesn't look like a YouTube link."; return; }
+  $("msg").className = "msg"; $("msg").textContent = "";
+  openAddModal(url, url, (ok) => { if (ok) $("url").value = ""; });
 });
 
 // ---------------- tabs + history ----------------
@@ -340,9 +439,9 @@ $("histList").addEventListener("click", async (e) => {
     return;
   }
   const b = e.target.closest("button[data-add]"); if (!b) return;
-  b.disabled = true;
-  if (await addSong(b.dataset.add)) b.textContent = "Added ✓";
-  else b.disabled = false;
+  const h = histItems.find((x) => x.video_id === b.dataset.add);
+  // After adding, the list redraws with an "in playlist" tag on this song.
+  openAddModal(b.dataset.add, (h && h.title) || b.dataset.add, null);
 });
 setInterval(() => { if (currentTab === "history") loadHistory(); }, 5000);
 loadHistory();
@@ -434,8 +533,63 @@ async function poll() {
 setInterval(poll, 1000); poll();
 
 // ---------------- player ----------------
-$("joinHint").textContent = `On a phone, open ${location.origin} to add songs and control the TV`;
-$("startBtn").onclick = () => { started = true; $("startOverlay").classList.add("hidden"); poll(); };
+// Address phones should open: the server's network address (a TV page opened
+// as localhost would give phones an address that only works on this computer).
+let joinUrl = location.origin;
+fetch("/api/join").then((r) => r.json()).then((d) => {
+  joinUrl = d.url;
+  document.querySelectorAll(".joinUrl").forEach((e) => (e.textContent = joinUrl));
+}).catch(() => {});
+document.querySelectorAll(".joinUrl").forEach((e) => (e.textContent = joinUrl));
+// ---------------- starting the TV player ----------------
+// Browsers only allow sound after someone clicks on the page. The player can
+// start three ways: Start on the TV (a click: sound on); by itself, when the
+// browser allows sound without a click (e.g. started with
+// --autoplay-policy=no-user-gesture-required); or from a phone. A phone start
+// on a browser that blocks sound plays muted until someone clicks on the TV.
+let autoplayOK = false, soundBlocked = false, tvReady = false, serverStarted = false;
+const SILENCE = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==";
+
+function canAutoplay() {
+  const a = new Audio(SILENCE);
+  return a.play().then(() => { a.pause(); return true; }).catch(() => false);
+}
+
+function startPlayer(clicked) {
+  if (started) return;
+  started = true;
+  soundBlocked = !clicked && !autoplayOK;
+  $("startOverlay").classList.add("hidden");
+  applyMode(); updateSoundBanner();
+  setPlayer({ started: true, sound_blocked: soundBlocked });
+  poll();
+}
+
+function updateSoundBanner() {
+  $("soundBanner").classList.toggle("hidden", !soundBlocked);
+}
+
+// Any click or key on the TV unlocks sound.
+function unlockSound() {
+  if (isRemote || !soundBlocked) return;
+  soundBlocked = false;
+  applyMode(); updateSoundBanner();
+  if (loadedId && !video.paused) { inst.currentTime = video.currentTime; inst.play().catch(() => {}); }
+  setPlayer({ sound_blocked: false });
+}
+document.addEventListener("pointerdown", unlockSound, true);
+document.addEventListener("keydown", unlockSound, true);
+
+$("startBtn").onclick = () => startPlayer(true);
+
+if (!isRemote) {
+  canAutoplay().then((ok) => {
+    autoplayOK = ok;
+    tvReady = true;
+    if (ok) startPlayer(false);                         // browser allows sound: start right away
+    else setPlayer({ started: false, sound_blocked: false });   // show "Start" on the phones
+  });
+}
 
 function syncPlayer(cur) {
   if (!started) return;
@@ -443,7 +597,7 @@ function syncPlayer(cur) {
   if (!cur) {
     unload(); wait.classList.remove("hidden");
     $("waitTitle").textContent = "No song queued";
-    $("waitText").innerHTML = `Paste a YouTube link on the right, or open <b>${location.origin}</b> on a phone.`;
+    $("waitText").textContent = "Paste a YouTube link on the right, or scan the code with a phone.";
     $("waitBarWrap").classList.add("hidden");
     return;
   }
@@ -502,14 +656,18 @@ async function load(cur) {
 // ---------------- shared player settings (TV + phones) ----------------
 // Audio mode and lyrics visibility live on the server, so a phone can change
 // them and the TV follows on its next poll (within about a second).
-let showLyrics = true, fullscreen = false, paused = false, playerRev = -1, pendingChanges = 0;
+let tvSoundBlocked = false;
+let showLyrics = true, fullscreen = false, paused = false, lyricsScale = 1.2, playerRev = -1, pendingChanges = 0;
 
 function applyPlayerState(ps) {
   // Skip while our own change is in flight, and skip anything older than what we have.
   if (!ps || pendingChanges > 0 || ps.rev < playerRev) return;
   playerRev = ps.rev;
   mode = ps.mode; showLyrics = ps.show_lyrics; fullscreen = !!ps.fullscreen; paused = !!ps.paused;
-  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); renderNowCard();
+  if (ps.lyrics_scale) lyricsScale = ps.lyrics_scale;
+  serverStarted = !!ps.started; tvSoundBlocked = !!ps.sound_blocked;
+  if (!isRemote && tvReady && ps.started && !started) startPlayer(false);   // started from a phone
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); renderNowCard();
 }
 
 async function setPlayer(patch) {
@@ -518,9 +676,10 @@ async function setPlayer(patch) {
   if ("show_lyrics" in patch) showLyrics = patch.show_lyrics;
   if ("fullscreen" in patch) fullscreen = patch.fullscreen;
   if ("paused" in patch) paused = patch.paused;
+  if ("lyrics_scale" in patch) lyricsScale = patch.lyrics_scale;
   pendingChanges++;                          // ignore polls until the server replies
   // Runs inside the click handler, so on the TV a real fullscreen request is allowed.
-  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); renderNowCard();
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); renderNowCard();
   let ps = null;
   try {
     const r = await fetch("/api/player", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
@@ -541,13 +700,27 @@ function updateLyricsButton() {
   $("countdown").classList.toggle("off", !showLyrics);
 }
 $("lyrBtn").onclick = () => setPlayer({ show_lyrics: !showLyrics });
+
+// Lyrics size: shared with the phones, 50% - 300% in 10% steps.
+function applyLyricsSize() {
+  document.documentElement.style.setProperty("--lyr-scale", lyricsScale);
+  const pct = Math.round(lyricsScale * 100) + "%";
+  $("lyrSize").textContent = pct; $("rmLyrSize").textContent = pct;
+  $("lyrSmaller").disabled = $("rmLyrSmaller").disabled = lyricsScale <= 0.5;
+  $("lyrBigger").disabled = $("rmLyrBigger").disabled = lyricsScale >= 3.0;
+}
+const resizeLyrics = (d) => setPlayer({ lyrics_scale: Math.round(Math.min(3, Math.max(0.5, lyricsScale + d)) * 10) / 10 });
+$("lyrSmaller").onclick = $("rmLyrSmaller").onclick = () => resizeLyrics(-0.1);
+$("lyrBigger").onclick = $("rmLyrBigger").onclick = () => resizeLyrics(+0.1);
+applyLyricsSize();
 updateLyricsButton();
 
 // Original = the video's own audio. Backing track = video muted + separated
 // instrumental played alongside, kept locked to the video's clock.
 function applyMode() {
-  video.muted = mode === "inst";
-  inst.muted = mode !== "inst";
+  // While the browser blocks sound, play muted (allowed) instead of not at all.
+  video.muted = soundBlocked || mode === "inst";
+  inst.muted = soundBlocked || mode !== "inst";
   for (const [o, i] of [["modeOrig", "modeInst"], ["rmOrig", "rmInst"]]) {
     $(o).classList.toggle("on", mode === "orig");
     $(i).classList.toggle("on", mode === "inst");
@@ -562,6 +735,8 @@ function renderNowCard() {
   if (!isRemote) return;
   // Always shown on phones, so the TV's fullscreen can be controlled any time.
   $("nowCard").classList.remove("hidden");
+  $("rmStart").classList.toggle("hidden", serverStarted);
+  $("rmWarn").classList.toggle("hidden", !(serverStarted && tvSoundBlocked));
   $("rmFs").textContent = fullscreen ? "Exit TV fullscreen" : "TV fullscreen";
   $("rmFs").classList.toggle("on", fullscreen);
   for (const id of ["rmOrig", "rmInst", "rmSkip"]) $(id).disabled = !nowItem;
@@ -570,12 +745,14 @@ function renderNowCard() {
   $("rmPause").classList.toggle("on", paused && !!nowItem);
   if (!nowItem) {
     $("rmTitle").textContent = "Nothing playing";
-    $("rmStatus").textContent = "Add a song below.";
+    $("rmStatus").textContent = serverStarted ? "Add a song below." : "The TV player isn't started yet.";
     $("rmLyrics").disabled = true; $("rmLyrics").textContent = "Lyrics";
     return;
   }
   $("rmTitle").textContent = (nowItem.title || nowItem.video_id) + (nowItem.singer ? ` — ${nowItem.singer}` : "");
-  $("rmStatus").textContent = !nowItem.ready ? stageInfo(nowItem).text : paused ? "Paused on the TV" : "Now playing on the TV";
+  $("rmStatus").textContent = !nowItem.ready ? stageInfo(nowItem).text
+    : !serverStarted ? "Ready. Tap Start to play it on the TV."
+    : paused ? "Paused on the TV" : "Now playing on the TV";
   const has = !!nowItem.has_lyrics;
   const lb = $("rmLyrics");
   lb.disabled = !has;
@@ -587,6 +764,26 @@ $("rmInst").onclick = () => setPlayer({ mode: "inst" });
 $("rmLyrics").onclick = () => setPlayer({ show_lyrics: !showLyrics });
 $("rmSkip").onclick = () => { if (confirmSkip()) post("/api/next"); };
 $("rmFs").onclick = () => setPlayer({ fullscreen: !fullscreen });
+$("rmStart").onclick = () => setPlayer({ started: true });
+
+// Invite: show a big QR code on this phone for others to scan. It only joins
+// (start=0); the TV's own code is the one that also starts the TV.
+$("inviteBtn").onclick = () => {
+  $("qrModalImg").src = "/qr.svg?start=0&t=" + Date.now();
+  $("qrModal").classList.remove("hidden");
+};
+const closeInvite = () => $("qrModal").classList.add("hidden");
+$("qrClose").onclick = closeInvite;
+$("qrModal").addEventListener("click", (e) => { if (e.target === $("qrModal")) closeInvite(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeInvite(); closeAddModal(); } });
+
+// Opened by scanning the TV's QR code (…/?start=1): start the TV player too,
+// then drop the parameter so a reload doesn't send it again.
+if (isRemote && params.has("start")) {
+  params.delete("start");
+  history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : "") + location.hash);
+  setTimeout(() => setPlayer({ started: true }), 0);
+}
 $("rmPause").onclick = () => setPlayer({ paused: !paused });
 function confirmSkip() {
   // Two taps within 3 s, so a stray tap on a phone doesn't skip someone's song.

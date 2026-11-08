@@ -8,12 +8,14 @@ from __future__ import annotations
 import asyncio
 import faulthandler
 import logging
+import io
 import re
+import socket
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -35,7 +37,11 @@ manager = JobManager(make_pipeline(), config.DATA_DIR, config.DOWNLOAD_WORKERS, 
 playlist: list[dict] = []      # [{"video_id", "singer"}]; playlist[0] is now playing
 # Player settings shared by the TV and every phone. "rev" goes up on each change
 # so a page can ignore a stale poll that was sent before its own change landed.
-player = {"mode": "inst", "show_lyrics": True, "fullscreen": False, "paused": False, "rev": 0}   # mode: "inst" (backing) | "orig"
+player = {"mode": "inst", "show_lyrics": True, "fullscreen": False, "paused": False,
+          "lyrics_scale": 1.2,
+          "started": False,         # TV player started (Start on the TV, or from a phone)
+          "sound_blocked": False,   # TV browser blocks sound until someone clicks on the TV
+          "rev": 0}   # mode: "inst" (backing) | "orig"
 
 
 def reprioritize():
@@ -100,6 +106,9 @@ class PlayerUpdate(BaseModel):
     show_lyrics: bool | None = None
     fullscreen: bool | None = None   # TV video fills the whole screen
     paused: bool | None = None       # pause / resume the song on the TV
+    lyrics_scale: float | None = None  # lyrics size on the TV, 1.0 = standard (0.5 - 3.0)
+    started: bool | None = None        # start the TV player (or, from the TV, reset on load)
+    sound_blocked: bool | None = None  # reported by the TV
 
 
 class Process(BaseModel):
@@ -108,6 +117,53 @@ class Process(BaseModel):
     priority: int = 10
     skip_lyrics: bool = False
     duet: bool = False
+
+
+def lan_ip() -> str:
+    """This computer's address on the local network (the interface used for
+    the default route). Connecting a UDP socket sends no packets."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "127.0.0.1"
+
+
+def join_url(request: Request) -> str:
+    """Address phones should open. The TV page is often opened as localhost,
+    which only works on this computer, so use the network address instead."""
+    if config.PUBLIC_URL:
+        return config.PUBLIC_URL
+    host, port = request.url.hostname or "localhost", request.url.port
+    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        host = lan_ip()
+    return f"{request.url.scheme}://{host}" + (f":{port}" if port else "")
+
+
+@app.get("/api/join")
+def join(request: Request):
+    # The QR code adds ?start=1: a phone that scans it also starts the TV player.
+    url = join_url(request)
+    return {"url": url, "qr_url": url + "/?start=1"}
+
+
+@app.get("/qr.svg")
+def qr_code(request: Request, start: int = 1):
+    """QR code of the join address, drawn here so it works without internet.
+    start=1 (the TV's code) also starts the TV player; start=0 (a phone's
+    "Invite" code) only joins."""
+    try:
+        import segno
+    except ImportError:
+        raise HTTPException(404, "QR codes need the 'segno' package: pip install segno")
+    buf = io.BytesIO()
+    segno.make(join_url(request) + ("/?start=1" if start else "/"), error="m").save(
+        buf, kind="svg", scale=10, border=2, dark="#000000", light="#ffffff", xmldecl=False)
+    return Response(buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/")
@@ -151,6 +207,12 @@ def update_player(body: PlayerUpdate):
         player["fullscreen"] = body.fullscreen
     if body.paused is not None:
         player["paused"] = body.paused
+    if body.lyrics_scale is not None:
+        player["lyrics_scale"] = round(min(3.0, max(0.5, body.lyrics_scale)), 2)
+    if body.started is not None:
+        player["started"] = body.started
+    if body.sound_blocked is not None:
+        player["sound_blocked"] = body.sound_blocked
     player["rev"] += 1
     return player
 

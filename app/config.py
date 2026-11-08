@@ -52,6 +52,11 @@ MAX_DURATION = int(os.environ.get("KARAOKE_MAX_DURATION", "600"))
 # Video height to download. 720 keeps files small; 1080 also works.
 MAX_HEIGHT = int(os.environ.get("KARAOKE_MAX_HEIGHT", "720"))
 
+# Address phones use to join (shown as text and QR code on the TV). Normally
+# worked out automatically; set it if the guess is wrong, e.g. with a VPN:
+#   KARAOKE_PUBLIC_URL=http://192.168.1.23:8000
+PUBLIC_URL = os.environ.get("KARAOKE_PUBLIC_URL", "").rstrip("/")
+
 # Labels shown on the TV for duet voice tags (male, female), e.g. "男,女".
 VOICE_LABELS = (os.environ.get("KARAOKE_VOICE_LABELS", "M,F").split(",") + ["M", "F"])[:2]
 
