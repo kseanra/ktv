@@ -82,6 +82,8 @@
     font-size: 10px; font-weight: 700; border-radius: 99px; padding: 1px 5px; min-width: 16px; }
   body.remote[data-view="dashboard"] .dash-only { display: flex; }
   body.remote[data-view="dashboard"] #addForm,
+  body.remote[data-view="dashboard"] #searchResults,
+  body.remote[data-view="history"] #searchResults,
   body.remote[data-view="dashboard"] #tabPlaylist,
   body.remote[data-view="dashboard"] #tabHistory,
   body.remote[data-view="playlist"] #nowCard,
@@ -149,6 +151,13 @@
   .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
   .tabs .count { font-size: 11px; background: #2a2634; border-radius: 99px; padding: 1px 7px; margin-left: 4px; }
   .search { padding: 10px 8px 2px; }
+  /* YouTube search results (Playlist tab on phones, side panel on the TV) */
+  .results { border-bottom: 1px solid var(--line); padding: 4px 8px 8px; max-height: 50vh; overflow-y: auto; }
+  body.remote .results { max-height: none; overflow: visible; }
+  .results-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; color: var(--dim); }
+  .results-head span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .results-head button { padding: 4px 10px; font-size: 13px; }
+  .results .ch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
   .hist { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; }
   .hist:hover { background: #1b1823; }
   .hist img { width: 96px; height: 54px; object-fit: cover; border-radius: 6px; background: #221f2b; display: block; }
@@ -272,7 +281,7 @@
       <button id="inviteBtn" class="primary">Show QR</button>
     </div>
     <form id="addForm">
-      <input id="url" placeholder="Paste a YouTube link" autocomplete="off" required>
+      <input id="url" type="search" enterkeyhint="search" placeholder="Song name or YouTube link" autocomplete="off" required>
       <div class="row">
         <input id="singer" placeholder="Your name (optional)" maxlength="20">
         <select id="lang" title="Song language: helps the lyrics recogniser">
@@ -284,9 +293,13 @@
           <option value="ko">Korean</option>
         </select>
       </div>
-      <button class="primary" type="submit">Add to playlist</button>
+      <button class="primary" type="submit" id="addSubmit">Search YouTube</button>
       <div class="msg" id="msg"></div>
     </form>
+    <div class="results hidden" id="searchResults">
+      <div class="results-head"><span id="resultsFor"></span><button type="button" id="resultsClose">✕ Close</button></div>
+      <div id="resultsList"></div>
+    </div>
     <div class="tabs">
       <button data-tab="playlist" class="on">Playlist <span class="count" id="plCount">0</span></button>
       <button data-tab="history">History <span class="count" id="histCount">0</span></button>
@@ -396,7 +409,6 @@ function toast(text, isErr = false) {
 // Both "Add to playlist" and History's "+ Add" open it; the song is added only
 // when "Add" is pressed, with the options chosen there.
 let pendingAdd = null;   // {url, onAdded}
-const YT_ID = /(?:v=|\/shorts\/|\/embed\/|\/live\/|youtu\.be\/)([A-Za-z0-9_-]{11})|^([A-Za-z0-9_-]{11})$/;
 
 function openAddModal(url, label, onAdded) {
   pendingAdd = { url, onAdded };
@@ -419,14 +431,76 @@ $("addConfirm").onclick = async () => {
 $("addCancel").onclick = closeAddModal;
 $("addModal").addEventListener("click", (e) => { if (e.target === $("addModal")) closeAddModal(); });
 
+// The box takes a YouTube link (added straight away, through the popup) or a
+// song name (searched on YouTube; each result has its own + Add).
+const isLink = (v) => /(?:v=|\/shorts\/|\/embed\/|\/live\/|youtu\.be\/)[A-Za-z0-9_-]{11}/.test(v);
+function updateSubmitLabel() {
+  $("addSubmit").textContent = isLink($("url").value.trim()) ? "Add to playlist" : "Search YouTube";
+}
+$("url").addEventListener("input", updateSubmitLabel);
+
 $("addForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  const url = $("url").value.trim();
-  const m = url.match(YT_ID);
-  if (!m) { $("msg").className = "msg err"; $("msg").textContent = "That doesn't look like a YouTube link."; return; }
+  const v = $("url").value.trim();
+  if (!v) return;
   $("msg").className = "msg"; $("msg").textContent = "";
-  openAddModal(url, url, (ok) => { if (ok) $("url").value = ""; });
+  if (isLink(v)) {
+    openAddModal(v, v, (ok) => { if (ok) { $("url").value = ""; updateSubmitLabel(); } });
+  } else {
+    searchSongs(v);
+  }
 });
+
+// ---------------- YouTube search ----------------
+let results = [], resultsQuery = "", searchSeq = 0;
+const fmtViews = (n) => !n ? "" : n >= 1e9 ? (n / 1e9).toFixed(1) + "B views" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M views"
+  : n >= 1e3 ? Math.round(n / 1e3) + "K views" : n + " views";
+
+async function searchSongs(q) {
+  const seq = ++searchSeq;
+  resultsQuery = q; results = [];
+  $("searchResults").classList.remove("hidden");
+  $("resultsFor").textContent = `Searching YouTube for “${q}”…`;
+  $("resultsList").innerHTML = `<div class="empty">Searching…</div>`;
+  $("addSubmit").disabled = true;
+  if (isRemote) $("url").blur();           // hide the phone keyboard so results show
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || "Search failed");
+    if (seq !== searchSeq) return;           // a newer search has started
+    results = data;
+    $("resultsFor").textContent = `Results for “${q}”`;
+    renderResults();
+  } catch (err) {
+    if (seq !== searchSeq) return;
+    $("resultsFor").textContent = `Results for “${q}”`;
+    $("resultsList").innerHTML = `<div class="empty" style="color:var(--err)">${esc(err.message)}</div>`;
+  } finally {
+    if (seq === searchSeq) $("addSubmit").disabled = false;
+  }
+}
+
+function renderResults() {
+  if (!results.length) { $("resultsList").innerHTML = `<div class="empty">No videos found. Try other words, e.g. add the singer's name.</div>`; return; }
+  $("resultsList").innerHTML = results.map((r, i) => `<div class="hist">
+      <img loading="lazy" src="${esc(r.thumbnail || `https://i.ytimg.com/vi/${r.video_id}/mqdefault.jpg`)}" alt="" onerror="this.style.visibility='hidden'">
+      <div><div class="t" title="${esc(r.title)}">${esc(r.title || r.video_id)}</div>
+        <div class="m">${r.channel ? `<span class="ch">${esc(r.channel)}</span>` : ""}
+          ${fmtDur(r.duration) ? `<span>${fmtDur(r.duration)}</span>` : ""}
+          ${fmtViews(r.views) ? `<span>${fmtViews(r.views)}</span>` : ""}
+          ${r.ready ? `<span class="tag ok" title="Processed before: ready to sing straight away">ready</span>` : ""}
+          ${r.in_playlist ? `<span class="tag in">in playlist</span>` : ""}</div></div>
+      <div class="hbtns"><button data-ri="${i}"${r.in_playlist ? ` title="Already in the playlist; adds it again"` : ""}>+ Add</button></div>
+    </div>`).join("");
+}
+
+$("resultsList").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-ri]"); if (!b) return;
+  const r = results[+b.dataset.ri]; if (!r) return;
+  openAddModal(r.video_id, r.title || r.video_id, (ok) => { if (ok) { r.in_playlist = true; renderResults(); } });
+});
+$("resultsClose").onclick = () => { ++searchSeq; results = []; $("searchResults").classList.add("hidden"); $("addSubmit").disabled = false; };
 
 // ---------------- tabs + history ----------------
 let currentTab = "playlist", histItems = [];

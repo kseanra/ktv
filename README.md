@@ -39,7 +39,7 @@ run-mock.bat       :: try the UI first: fake songs, no YouTube or models needed
 run.bat            :: the real thing
 ```
 
-Open **http://localhost:8000**, click *Start player*, then paste a YouTube link.
+Open **http://localhost:8000**, click *Start player*, then type a song name (or paste a YouTube link).
 On a phone on the same Wi-Fi, open `http://<your-PC-IP>:8000` to add
 songs (allow Python through Windows Firewall when asked; `ipconfig` shows the IP).
 
@@ -152,10 +152,18 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   QR code for others to scan; that one only joins, it doesn't start the TV. It uses this computer's network
   address, not `localhost`. If it picks the wrong one (e.g. with a VPN), set
   `KARAOKE_PUBLIC_URL=http://192.168.x.x:8000`.
+- **Search YouTube by song name**: type a song name (instead of a link) in
+  the add box and press *Search YouTube*. The top 10 results show with
+  thumbnail, channel, length and views; **+ Add** opens the usual Add popup.
+  Results marked *ready* were processed before and play straight away.
+  Pasting a link still adds it directly. Search uses yt-dlp (no API key);
+  live streams and videos over the length limit are left out, and a search is
+  remembered for 10 minutes. If search stops working, update yt-dlp
+  (`pip install -U yt-dlp` in `.venv`).
 - **Phone layout**: three tabs at the bottom. **Dashboard**: what's on the TV,
   Start, Pause, Original / Backing track, Lyrics on/off and size, TV
   fullscreen, Skip, and *Invite friends* (QR code). **Playlist**: add a song
-  (link, then the Add popup) and the queue. **History**: search and re-add or
+  (search by name, or paste a link) and the queue. **History**: search and re-add or
   delete songs. The phone remembers the last tab.
 - **Phones and tablets always get the phone view** (add songs + remote control),
   never the player. Add `?tv` to the address to use a tablet as the screen, or
@@ -231,6 +239,7 @@ lyrics run early or late.
 | GET | `/api/state` | playlist + queue status (the page polls this every second) |
 | POST | `/api/process` | `{url, language?, priority?, skip_lyrics?}` process without the playlist |
 | GET | `/api/join`, `/qr.svg?start=1\|0` | address phones should open, and its QR code (start=1 also starts the TV) |
+| GET | `/api/search?q=...&limit=10` | YouTube search: `[{video_id, title, channel, duration, views, thumbnail, ready, in_playlist}]` |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |
 | GET | `/api/jobs`, `/api/jobs/{id}` | job status |

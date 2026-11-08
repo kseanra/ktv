@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from . import config
 from .jobs import JobManager
-from .pipeline import check_ffmpeg_for_ytdlp, check_js_runtime, extract_video_id, make_pipeline
+from .pipeline import check_ffmpeg_for_ytdlp, check_js_runtime, extract_video_id, make_pipeline, search_youtube
 
 # If a native library ever crashes the process (e.g. "segmentation fault"),
 # print where it happened instead of exiting silently. Not on Windows: there it
@@ -287,6 +287,28 @@ async def delete_song(video_id: str):
     except OSError:
         raise HTTPException(409, "Its files are still in use. Try again in a moment.")
     return {"deleted": video_id}
+
+
+@app.get("/api/search")
+async def search(q: str, limit: int = 10):
+    """Search YouTube by song name. Each result says whether that song is
+    already processed (ready to sing) or already in the playlist."""
+    q = q.strip()
+    if not q:
+        return []
+    try:
+        results = await asyncio.get_running_loop().run_in_executor(
+            None, search_youtube, q, max(1, min(limit, 20)))
+    except Exception as e:  # noqa: BLE001
+        log.warning("search failed for %r: %s", q, e)
+        raise HTTPException(502, "YouTube search failed. Check the internet connection, or update yt-dlp.")
+    in_playlist = {item["video_id"] for item in playlist}
+    out = []
+    for r in results:
+        job = manager.jobs.get(r["video_id"])
+        ready = (job.status == "done") if job else (config.DATA_DIR / r["video_id"] / "instrumental.mp3").exists()
+        out.append({**r, "ready": ready, "in_playlist": r["video_id"] in in_playlist})
+    return out
 
 
 @app.get("/api/history")

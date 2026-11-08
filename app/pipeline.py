@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import threading
 import time
+import zlib
 from pathlib import Path
 
 from . import config
@@ -458,6 +459,59 @@ def _mock_voices(self, job, out: Path):
 
 
 MockPipeline.voices = _mock_voices
+
+
+# ----------------------------------------------------------------- search
+_search_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
+_SEARCH_TTL = 600   # seconds a search result is reused
+
+
+def _thumb(vid: str) -> str:
+    return f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"
+
+
+def search_youtube(query: str, limit: int = 10) -> list[dict]:
+    """Top YouTube results for a text search, without downloading anything.
+    Uses yt-dlp's "ytsearch" (no API key). Live streams and videos longer than
+    MAX_DURATION are left out."""
+    query = " ".join(query.split())[:100]
+    key = (query.lower(), limit)
+    hit = _search_cache.get(key)
+    if hit and time.time() - hit[0] < _SEARCH_TTL:
+        return hit[1]
+    if config.MOCK:
+        results = [{"video_id": f"mock{i:03d}{zlib.crc32(query.encode()) % 10000:04d}"[:11],
+                    "title": f"{query} (mock result {i + 1})", "channel": "Mock channel",
+                    "duration": 180 + 17 * i, "views": 1000 * (limit - i), "thumbnail": ""}
+                   for i in range(limit)]
+        time.sleep(0.5)
+    else:
+        import yt_dlp
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                "extract_flat": "in_playlist", "js_runtimes": js_runtimes()}
+        # ask for a few extra: some are dropped below (live, too long)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"ytsearch{limit + 5}:{query}", download=False)
+        results = []
+        for e in info.get("entries") or []:
+            vid = e.get("id") or ""
+            dur = e.get("duration")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+                continue          # a channel or playlist, not a video
+            if e.get("live_status") in ("is_live", "is_upcoming") or not dur:
+                continue
+            if dur > config.MAX_DURATION:
+                continue
+            results.append({"video_id": vid, "title": e.get("title") or "",
+                            "channel": e.get("channel") or e.get("uploader") or "",
+                            "duration": int(dur), "views": e.get("view_count") or 0,
+                            "thumbnail": _thumb(vid)})
+            if len(results) >= limit:
+                break
+    if len(_search_cache) > 200:
+        _search_cache.clear()
+    _search_cache[key] = (time.time(), results)
+    return results
 
 
 def make_pipeline():
