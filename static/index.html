@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Karaoke Prototype</title>
 <style>
   :root {
@@ -65,8 +65,40 @@
   .side { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .side header { padding: 16px; border-bottom: 1px solid var(--line); }
   .side h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
-  .invite { display: none; margin-left: auto; padding: 6px 12px; font-size: 14px; font-weight: 600; }
-  body.remote .invite { display: inline-block; }
+  /* ---------- phone view: bottom tabs (Dashboard / Playlist / History) ---------- */
+  .bottomnav, .dash-only { display: none; }
+  body.remote { padding-bottom: calc(64px + env(safe-area-inset-bottom)); background: var(--panel); }
+  body.remote .app { height: auto; min-height: 100vh; }
+  body.remote .side { border: 0; }
+  body.remote .side .list { overflow: visible; flex: none; }
+  body.remote .tabs { display: none; }
+  body.remote .bottomnav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+  .bottomnav button { flex: 1; border: 0; border-radius: 0; background: transparent; position: relative;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 4px 8px; color: var(--dim); font-size: 12px; }
+  .bottomnav button.on { color: var(--accent); }
+  .bottomnav svg { width: 24px; height: 24px; }
+  .nbadge { position: absolute; top: 4px; left: calc(50% + 6px); background: var(--accent); color: #fff;
+    font-size: 10px; font-weight: 700; border-radius: 99px; padding: 1px 5px; min-width: 16px; }
+  body.remote[data-view="dashboard"] .dash-only { display: flex; }
+  body.remote[data-view="dashboard"] #addForm,
+  body.remote[data-view="dashboard"] #tabPlaylist,
+  body.remote[data-view="dashboard"] #tabHistory,
+  body.remote[data-view="playlist"] #nowCard,
+  body.remote[data-view="playlist"] #tabHistory,
+  body.remote[data-view="history"] #nowCard,
+  body.remote[data-view="history"] #addForm,
+  body.remote[data-view="history"] #tabPlaylist { display: none !important; }
+  body.remote:not([data-view="dashboard"]) .tvlink { display: none; }
+  .dashcard { margin: 12px 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px;
+    align-items: center; gap: 12px; background: #1b1823; }
+  .dashcard > div { flex: 1; display: grid; gap: 2px; }
+  .dashcard span { color: var(--dim); font-size: 13px; }
+  .dashcard button { padding: 10px 16px; white-space: nowrap; }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom));
+    z-index: 45; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; background: #2a2634;
+    border: 1px solid var(--line); font-size: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+  .toast.err { border-color: var(--err); color: var(--err); }
   .modal { position: fixed; inset: 0; z-index: 50; background: rgba(5, 4, 9, .97); display: grid; place-items: center; padding: 16px; }
   .modal-card { width: min(420px, 100%); text-align: center; display: grid; gap: 12px; justify-items: center; }
   .modal-card h2 { margin: 0; font-size: 22px; }
@@ -219,8 +251,7 @@
   </section>
 
   <aside class="side">
-    <header><h1>Karaoke prototype <span class="badge hidden" id="mockBadge">MOCK MODE</span>
-      <button id="inviteBtn" class="invite" title="Show a QR code so others can join">Invite</button></h1></header>
+    <header><h1>Karaoke prototype <span class="badge hidden" id="mockBadge">MOCK MODE</span></h1></header>
     <div class="nowcard hidden" id="nowCard">
       <div class="nc-label">On the TV</div>
       <button id="rmStart" class="primary hidden">▶ Start TV player</button>
@@ -235,6 +266,10 @@
         <button id="rmFs">TV fullscreen</button>
         <button id="rmSkip">Skip ›</button>
       </div>
+    </div>
+    <div class="dashcard dash-only" id="inviteCard">
+      <div><b>Invite friends</b><span>Show a QR code they can scan to join</span></div>
+      <button id="inviteBtn" class="primary">Show QR</button>
     </div>
     <form id="addForm">
       <input id="url" placeholder="Paste a YouTube link" autocomplete="off" required>
@@ -266,6 +301,12 @@
     </div>
     <a class="tvlink" id="tvLink" href="/?tv">Use this device as the TV screen</a>
   </aside>
+  <nav class="bottomnav" id="bottomNav" aria-label="Views">
+    <button data-view="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z" fill="currentColor"/></svg>Dashboard</button>
+    <button data-view="playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h12M4 12h12M4 18h8"/><path d="M19 15v6m-3-3h6"/></svg>Playlist<span class="nbadge hidden" id="navPlCount">0</span></button>
+    <button data-view="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
+  </nav>
+  <div class="toast hidden" id="toast" role="status"></div>
 </div>
 
 <div class="modal hidden" id="addModal" role="dialog" aria-label="Add song">
@@ -335,9 +376,20 @@ async function addSong(url) {
     msg.textContent = j.ready ? `Added: ${j.title || "song"} is ready to sing.`
       : !j.skip_lyrics && j.status.includes("transcribe") ? "Added. Extracting lyrics in the background."
       : "Added. Processing in the background.";
+    toast(msg.textContent);
     poll(); if (currentTab === "history") loadHistory();
     return true;
-  } catch (err) { msg.className = "msg err"; msg.textContent = err.message; return false; }
+  } catch (err) { msg.className = "msg err"; msg.textContent = err.message; toast(err.message, true); return false; }
+}
+
+// Short message above the phone's tab bar, visible on any tab.
+let toastTimer = null;
+function toast(text, isErr = false) {
+  if (!isRemote) return;
+  const t = $("toast");
+  t.textContent = text; t.className = "toast" + (isErr ? " err" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add("hidden"), isErr ? 5000 : 2800);
 }
 
 // ---------------- "Add song" popup ----------------
@@ -385,6 +437,21 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
   $("tabHistory").classList.toggle("hidden", currentTab !== "history");
   if (currentTab === "history") loadHistory();
 }));
+
+// Phone view: the bottom tabs switch between Dashboard, Playlist and History.
+function setView(view) {
+  if (!["dashboard", "playlist", "history"].includes(view)) view = "dashboard";
+  document.body.dataset.view = view;
+  document.querySelectorAll("#bottomNav button").forEach((b) => b.classList.toggle("on", b.dataset.view === view));
+  currentTab = view === "history" ? "history" : view === "playlist" ? "playlist" : "dashboard";
+  $("tabPlaylist").classList.toggle("hidden", view !== "playlist");
+  $("tabHistory").classList.toggle("hidden", view !== "history");
+  if (view === "history") loadHistory();
+  pref.set("view", view);
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("#bottomNav button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+if (isRemote) setView(pref.get("view", "dashboard"));
 
 const fmtDur = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}` : "");
 
@@ -487,6 +554,8 @@ function render(state) {
     `<div><b>${s}</b>${q.running[s]} running · ${q.waiting[s]} waiting</div>`).join("");
 
   $("plCount").textContent = state.playlist.length;
+  $("navPlCount").textContent = state.playlist.length;
+  $("navPlCount").classList.toggle("hidden", !state.playlist.length);
   const list = $("list");
   if (!state.playlist.length) { list.innerHTML = `<div class="empty">Playlist is empty.</div>`; }
   else list.innerHTML = state.playlist.map((it, i) => {

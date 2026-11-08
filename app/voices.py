@@ -12,6 +12,12 @@ The male and female ranges are calibrated per song: the typical pitch of every
 lyric line is split into a low and a high group (the two singers). Each line
 is then tagged with whichever evidence is stronger, relative to the song.
 
+Lines whose main pitch sits almost entirely on one side of the boundary
+(over 85% above, or under 15%) follow the pitch directly; the evidence
+comparison decides the in-between lines. (High female lines can otherwise
+read as male: a note at 1/3 of her pitch is in the male range and its 3rd
+harmonic is her note.)
+
 Known limits (measured on a duet with known answers: about 70-80% of solo
 lines right): a man's high chorus notes or a woman's low verse notes can be
 tagged as the other singer; lines sung together get one of the two tags.
@@ -179,6 +185,12 @@ def tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
         v = voiced[a:b]
         m = male_ev[a:b][v].mean() / nm
         f = fem_ev[a:b][v].mean() / nf
-        ln["voice"] = "F" if f > m else "M"
+        share = np.mean(f1[a:b][v] >= th)      # main voice above the boundary
+        if share > 0.85:
+            ln["voice"] = "F"                   # clearly high: follow the pitch
+        elif share < 0.15:
+            ln["voice"] = "M"                   # clearly low
+        else:
+            ln["voice"] = "F" if f > m else "M"
         n += 1
     return {"tagged": n, "low_hz": round(lo, 1), "high_hz": round(hi, 1), "boundary_hz": round(th, 1)}

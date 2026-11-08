@@ -152,8 +152,11 @@ class JobManager:
             if not skip_lyrics and job.skip_lyrics:
                 job.skip_lyrics = False          # lyrics were skipped before but are wanted now
                 more_work = True
-            if duet and not job.has_voices:
-                job.duet = True                  # an in-progress job picks this up after lyrics
+            if duet:
+                # Tag (or re-tag: it only takes a couple of seconds, and picks up
+                # improvements to the tagger). An in-progress job picks this up
+                # after its lyrics step.
+                job.duet = True
                 more_work = True
             if more_work and job.status == "done":
                 job.priority = priority

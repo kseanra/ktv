@@ -148,10 +148,15 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
 - **Joining from a phone**: the TV's start screen and idle screen show a QR
   code (and the address) for phones to scan. Scanning it also starts the TV
   player (the code's address ends in `?start=1`); typing the address shown
-  under it just joins. On a phone, **Invite** (top right) shows a big QR code
-  for others to scan; that one only joins, it doesn't start the TV. It uses this computer's network
+  under it just joins. On a phone, **Invite friends → Show QR** (Dashboard) shows a big
+  QR code for others to scan; that one only joins, it doesn't start the TV. It uses this computer's network
   address, not `localhost`. If it picks the wrong one (e.g. with a VPN), set
   `KARAOKE_PUBLIC_URL=http://192.168.x.x:8000`.
+- **Phone layout**: three tabs at the bottom. **Dashboard**: what's on the TV,
+  Start, Pause, Original / Backing track, Lyrics on/off and size, TV
+  fullscreen, Skip, and *Invite friends* (QR code). **Playlist**: add a song
+  (link, then the Add popup) and the queue. **History**: search and re-add or
+  delete songs. The phone remembers the last tab.
 - **Phones and tablets always get the phone view** (add songs + remote control),
   never the player. Add `?tv` to the address to use a tablet as the screen, or
   `?remote` to force the phone view on a PC.
