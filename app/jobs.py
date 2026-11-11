@@ -64,6 +64,7 @@ class Job:
     has_lyrics: bool = False       # lyrics.json exists and has lines
     duet: bool = False             # tag lyric lines male / female
     has_voices: bool = False       # lyrics carry male / female tags
+    lyrics_query: str = ""         # song name typed by the user for the lyrics lookup
     created: float = field(default_factory=time.time)
     timings: dict = field(default_factory=dict)
 
@@ -136,14 +137,18 @@ class JobManager:
                 status="done", progress=1.0, timings=meta.get("timings", {}),
                 skip_lyrics=skipped, has_lyrics=has_lyrics,
                 duet=bool(lyrics.get("duet")), has_voices=bool(lyrics.get("duet")),
+                lyrics_query=meta.get("lyrics_query", ""),
             )
         log.info("cache: %d songs already processed", len(self.jobs))
 
     # ---------- public API ----------
     def submit(self, video_id: str, url: str, language: str | None, priority: int,
-               skip_lyrics: bool = False, duet: bool = False) -> Job:
+               skip_lyrics: bool = False, duet: bool = False, lyrics_query: str = "") -> Job:
         duet = duet and not skip_lyrics          # voice tags need lyrics
+        lyrics_query = (lyrics_query or "").strip()[:100]
         job = self.jobs.get(video_id)
+        if job and lyrics_query:
+            job.lyrics_query = lyrics_query
         if job and job.status != "error":
             # Already cached or in progress: attach to it, maybe raise its priority.
             if language and not job.has_lyrics:
@@ -165,7 +170,8 @@ class JobManager:
             self.set_priority(video_id, priority)
             return job
         job = Job(video_id=video_id, url=url, language=language or None, priority=priority,
-                  skip_lyrics=skip_lyrics, duet=duet)
+                  skip_lyrics=skip_lyrics, duet=duet,
+                  lyrics_query=lyrics_query or (job.lyrics_query if job else ""))
         self.jobs[video_id] = job
         info = _read_json(self.data_dir / video_id / "info.json")
         job.title, job.duration = info.get("title", ""), info.get("duration", 0)
@@ -224,6 +230,8 @@ class JobManager:
                 "has_audio": (d / "instrumental.mp3").exists(),
                 "has_lyrics": bool(lyrics.get("lines")),
                 "lyrics_skipped": bool(lyrics.get("skipped")),
+                "lyrics_source": lyrics.get("source", "ai") if lyrics.get("lines") else None,
+                "lyrics_query": meta.get("lyrics_query", ""),
                 "duet": bool(lyrics.get("duet")),
                 "status": job.status if job else ("done" if (d / "instrumental.mp3").exists() else "partial"),
                 "last_played": meta.get("last_played", 0),
@@ -314,7 +322,10 @@ class JobManager:
         old = _read_json(out_dir / "meta.json")
         meta = {k: v for k, v in job.public().items() if k in ("url", "title", "duration", "language", "duet")}
         meta["timings"] = {**old.get("timings", {}), **job.timings}
-        if "last_played" in old:
-            meta["last_played"] = old["last_played"]
+        for k in ("last_played", "lyrics_query"):
+            if k in old:
+                meta[k] = old[k]
+        if job.lyrics_query:
+            meta["lyrics_query"] = job.lyrics_query
         (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
         log.info("done %s (%s)%s %s", job.video_id, job.title, " [no lyrics]" if job.skip_lyrics else "", job.timings)

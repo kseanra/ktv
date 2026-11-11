@@ -52,6 +52,10 @@ MAX_DURATION = int(os.environ.get("KARAOKE_MAX_DURATION", "600"))
 # Video height to download. 720 keeps files small; 1080 also works.
 MAX_HEIGHT = int(os.environ.get("KARAOKE_MAX_HEIGHT", "720"))
 
+# After AI lyrics, look the song up on LRCLIB (lrclib.net, free) and, if it
+# clearly is the same song, show the real lyric text with the AI's timing.
+LYRICS_ONLINE = os.environ.get("KARAOKE_LYRICS_ONLINE", "1") == "1"
+
 # Address phones use to join (shown as text and QR code on the TV). Normally
 # worked out automatically; set it if the guess is wrong, e.g. with a VPN:
 #   KARAOKE_PUBLIC_URL=http://192.168.1.23:8000

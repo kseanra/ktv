@@ -121,6 +121,26 @@
   .check.opt small { color: var(--dim); font-size: 13px; }
   .addbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
   .addbtns button { width: 100%; }
+  .lyrq { display: grid; gap: 6px; font-size: 14px; }
+  .lyrq small { color: var(--dim); font-size: 12px; }
+  /* lyrics editor */
+  .lyrcard { max-height: calc(100dvh - 32px); overflow-y: auto; gap: 10px; width: min(560px, 100%); }
+  .lyrsrc { font-size: 13px; color: var(--dim); text-align: center; }
+  .lyrsrc.warn { color: var(--sung); }
+  .lyrsearch { display: flex; gap: 8px; }
+  .lyrsearch input { flex: 1; min-width: 0; }
+  .modal-card .lyrsearch button { padding: 9px 14px; font-size: 14px; white-space: nowrap; }
+  .lyrres { display: grid; gap: 6px; }
+  .lyrres:empty { display: none; }
+  .lres { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+  .lres.on { border-color: var(--accent); background: #24121c; }
+  .lres > div { flex: 1; min-width: 0; }
+  .lres b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .lres span { color: var(--dim); }
+  .modal-card .lres button { padding: 6px 14px; font-size: 13px; }
+  #lyrText { width: 100%; min-height: 180px; resize: vertical; font: inherit; font-size: 15px; line-height: 1.5; color: inherit;
+             background: #0f0e14; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
+  .modal-card .linkbtn { background: none; border: 0; color: var(--dim); font-size: 13px; padding: 4px; text-decoration: underline; justify-self: center; }
   .badge { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: #3a2a10; color: var(--sung); font-weight: 600; }
   form { display: grid; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -273,6 +293,7 @@
         <button id="rmLyrics">Lyrics: on</button>
         <span class="sizegrp" title="Lyrics size on the TV"><button id="rmLyrSmaller">A−</button><span class="pct" id="rmLyrSize">120%</span><button id="rmLyrBigger">A+</button></span>
         <button id="rmFs">TV fullscreen</button>
+        <button id="rmEditLyr" title="Find, paste or fix the lyrics of this song">Fix lyrics</button>
         <button id="rmSkip">Skip ›</button>
       </div>
     </div>
@@ -330,7 +351,23 @@
       <span><b>Skip lyrics</b><small>Faster: vocal removal only, no lyrics on the TV</small></span></label>
     <label class="check opt"><input type="checkbox" id="duet">
       <span><b>Male + female duet</b><small>Tag each lyric line M or F</small></span></label>
+    <label class="lyrq" id="lyrQueryWrap"><span>Song name for finding lyrics <small>(optional)</small></span>
+      <input id="lyrQuery" type="search" placeholder="e.g. 富士山下 陳奕迅" autocomplete="off" maxlength="100">
+      <small>Helps when the video title is messy. Song name, then singer.</small></label>
     <div class="addbtns"><button id="addCancel" type="button">Cancel</button><button class="primary" id="addConfirm" type="button">Add</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="lyrModal" role="dialog" aria-label="Lyrics">
+  <div class="modal-card addcard lyrcard">
+    <h2>Lyrics</h2>
+    <div class="addwhat" id="lyrWhat"></div>
+    <div class="lyrsrc" id="lyrSrc"></div>
+    <div class="lyrsearch"><input id="lyrQ" type="search" enterkeyhint="search" placeholder="Song name and singer, e.g. 富士山下 陳奕迅" autocomplete="off"><button id="lyrFind" type="button">Find online</button></div>
+    <div class="lyrres" id="lyrRes"></div>
+    <textarea id="lyrText" placeholder="Pick lyrics found online, or paste them here (one line per row). They are matched to the singing automatically."></textarea>
+    <div class="msg" id="lyrMsg"></div>
+    <div class="addbtns"><button id="lyrClose" type="button">Close</button><button class="primary" id="lyrSave" type="button">Save &amp; sync</button></div>
+    <button id="lyrAI" type="button" class="linkbtn">Use the AI's lyrics instead</button>
   </div>
 </div>
 <div class="modal hidden" id="qrModal" role="dialog" aria-label="Invite QR code">
@@ -370,7 +407,10 @@ $("skipLyrics").checked = false;
 $("duet").checked = false;
 // A duet needs lyrics, so the two options exclude each other.
 $("skipLyrics").addEventListener("change", () => { if ($("skipLyrics").checked) $("duet").checked = false; });
-$("duet").addEventListener("change", () => { if ($("duet").checked) $("skipLyrics").checked = false; });
+$("duet").addEventListener("change", () => { if ($("duet").checked) $("skipLyrics").checked = false; syncLyrQuery(); });
+// No lyrics wanted: no name to look them up by.
+const syncLyrQuery = () => $("lyrQueryWrap").classList.toggle("hidden", $("skipLyrics").checked);
+$("skipLyrics").addEventListener("change", syncLyrQuery);
 
 async function addSong(url) {
   const msg = $("msg");
@@ -379,7 +419,8 @@ async function addSong(url) {
     const r = await fetch("/api/queue", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, singer: $("singer").value, language: $("lang").value || null,
-                             skip_lyrics: $("skipLyrics").checked, duet: $("duet").checked }),
+                             skip_lyrics: $("skipLyrics").checked, duet: $("duet").checked,
+                             lyrics_query: $("skipLyrics").checked ? null : $("lyrQuery").value.trim() || null }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "failed");
@@ -410,10 +451,11 @@ function toast(text, isErr = false) {
 // when "Add" is pressed, with the options chosen there.
 let pendingAdd = null;   // {url, onAdded}
 
-function openAddModal(url, label, onAdded) {
+function openAddModal(url, label, onAdded, lyricsQuery = "") {
   pendingAdd = { url, onAdded };
   $("addWhat").textContent = label;
   $("skipLyrics").checked = false; $("duet").checked = false;
+  $("lyrQuery").value = lyricsQuery; $("lyrQueryWrap").classList.remove("hidden");
   $("addModal").classList.remove("hidden");
   $("addConfirm").focus();
 }
@@ -502,7 +544,11 @@ function renderResults() {
 $("resultsList").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-ri]"); if (!b) return;
   const r = results[+b.dataset.ri]; if (!r) return;
-  openAddModal(r.video_id, r.title || r.video_id, (ok) => { if (ok) { r.in_playlist = true; renderResults(); } });
+  // The words the user searched with are usually the song name: use them to
+  // find the lyrics too (editable in the popup). Once added, the search is done.
+  openAddModal(r.video_id, r.title || r.video_id, (ok) => {
+    if (ok) { $("url").value = ""; updateSubmitLabel(); clearResults(); }
+  }, resultsQuery);
 });
 function clearResults() {
   ++searchSeq;                              // a search still running is ignored
@@ -552,7 +598,7 @@ function renderHistory() {
   if (!items.length) { list.innerHTML = `<div class="empty">${histItems.length ? "No matching songs." : "No songs yet. Songs you add are kept here."}</div>`; return; }
   list.innerHTML = items.map((h) => {
     const busy = h.status.startsWith("waiting") || h.status.startsWith("running");
-    const lyr = h.has_lyrics ? `<span class="tag ok">lyrics</span>`
+    const lyr = h.has_lyrics ? `<span class="tag ok">${h.lyrics_source === "lrclib" ? "lyrics ✓ online" : h.lyrics_source === "pasted" ? "lyrics ✓ pasted" : "AI lyrics"}</span>`
       : busy || !h.has_audio ? ""
       : h.lyrics_skipped ? `<span class="tag no" title="Added with Skip lyrics. + Add (box unticked) extracts them.">lyrics skipped</span>`
       : `<span class="tag no" title="Lyrics extraction found no words">no lyrics found</span>`;
@@ -566,6 +612,7 @@ function renderHistory() {
           ${h.in_playlist ? `<span class="tag in">in playlist</span>` : ""}</div></div>
       <div class="hbtns">
         <button data-add="${h.video_id}">+ Add</button>
+        <button data-lyr="${h.video_id}" title="Find, paste or fix this song's lyrics"${busy ? " disabled" : ""}>Lyrics</button>
         ${armedKey === "del:" + h.video_id
           ? `<button data-del="${h.video_id}" class="armed" title="Tap again to delete for good">Confirm</button>`
           : `<button data-del="${h.video_id}" class="danger" title="Delete this song's files">Delete</button>`}
@@ -589,10 +636,13 @@ $("histList").addEventListener("click", async (e) => {
     await loadHistory(); poll();
     return;
   }
+  const lb = e.target.closest("button[data-lyr]");
+  if (lb) { openLyrics(lb.dataset.lyr); return; }
   const b = e.target.closest("button[data-add]"); if (!b) return;
   const h = histItems.find((x) => x.video_id === b.dataset.add);
   // After adding, the list redraws with an "in playlist" tag on this song.
-  openAddModal(b.dataset.add, (h && h.title) || b.dataset.add, null);
+  // the name its lyrics were looked up by before, if any
+  openAddModal(b.dataset.add, (h && h.title) || b.dataset.add, null, (h && h.lyrics_query) || "");
 });
 setInterval(() => { if (currentTab === "history") loadHistory(); }, 5000);
 loadHistory();
@@ -653,7 +703,7 @@ function render(state) {
     return `<div class="item ${i === 0 ? "now" : ""}">
       <div class="top"><span class="pos">${i === 0 ? "NOW" : "#" + i}</span>
         <span class="name" title="${esc(it.title)}">${esc(it.title || it.video_id)}${it.singer ? ` <span style="color:var(--dim)">· ${esc(it.singer)}</span>` : ""}</span>
-        <span class="acts">${i > 1 ? `<button data-up="${i}">↑</button>` : ""}${
+        <span class="acts">${i > 1 ? `<button data-top="${i}" data-vid="${it.video_id}" title="Play next (move to the top, below the song playing now)">⤒</button>` : ""}${
           armedKey === "rm:" + it.video_id
             ? `<button data-rm="${i}" data-vid="${it.video_id}" class="armed">Tap again to remove</button>`
             : `<button data-rm="${i}" data-vid="${it.video_id}" title="Remove from playlist (stays in History)">✕</button>`}</span></div>
@@ -677,7 +727,7 @@ $("list").addEventListener("click", (e) => {
     armedKey = null;
     post(`/api/playlist/${b.dataset.rm}/remove?video_id=${b.dataset.vid}`);
   }
-  if (b.dataset.up) post(`/api/playlist/${b.dataset.up}/up`);
+  if (b.dataset.top) post(`/api/playlist/${b.dataset.top}/top?video_id=${b.dataset.vid}`);
 });
 
 async function poll() {
@@ -755,6 +805,8 @@ function syncPlayer(cur) {
     return;
   }
   if (cur.video_id === loadedId) {
+    // Lyrics replaced (found online, pasted, re-tagged): load the new ones.
+    if (cur.lyrics_rev && cur.lyrics_rev !== loadedLyricsRev && !fetchingLyrics) { loadLyrics(cur.video_id, cur.lyrics_rev); return; }
     // Lyrics finished while the song was already playing: pick them up.
     if (cur.has_lyrics && !lyrics.length && !fetchingLyrics) loadLyrics(cur.video_id);
     else if (cur.has_voices && lyrics.length && !lyrics.some((l) => l.voice) && !fetchingLyrics) loadLyrics(cur.video_id);
@@ -780,9 +832,10 @@ function unload() {
   updateLyricsButton(); applyPaused();
 }
 
-let fetchingLyrics = false;
-async function loadLyrics(id) {
+let fetchingLyrics = false, loadedLyricsRev = 0;
+async function loadLyrics(id, rev) {
   fetchingLyrics = true;
+  if (rev) loadedLyricsRev = rev;
   let lines = [];
   try { lines = (await (await fetch(`/media/${id}/lyrics.json?t=${Date.now()}`)).json()).lines || []; } catch { /* none */ }
   fetchingLyrics = false;
@@ -800,6 +853,7 @@ async function load(cur) {
   video.src = `${base}/video.mp4`;
   inst.src = `${base}/instrumental.mp3`;
   lyrics = []; lastIdx = -2; updateLyricsButton();
+  loadedLyricsRev = cur.lyrics_rev || 0;
   if (cur.has_lyrics) loadLyrics(cur.video_id);
   applyMode();
   if (!paused) video.play().catch(() => {});
@@ -894,6 +948,7 @@ function renderNowCard() {
   $("rmFs").classList.toggle("on", fullscreen);
   for (const id of ["rmOrig", "rmInst", "rmSkip"]) $(id).disabled = !nowItem;
   $("rmPause").disabled = !nowItem || !nowItem.ready;
+  $("rmEditLyr").disabled = !nowItem || !nowItem.ready;
   $("rmPause").textContent = paused ? "▶ Resume" : "❚❚ Pause";
   $("rmPause").classList.toggle("on", paused && !!nowItem);
   if (!nowItem) {
@@ -916,8 +971,108 @@ $("rmOrig").onclick = () => setPlayer({ mode: "orig" });
 $("rmInst").onclick = () => setPlayer({ mode: "inst" });
 $("rmLyrics").onclick = () => setPlayer({ show_lyrics: !showLyrics });
 $("rmSkip").onclick = () => { if (confirmSkip()) post("/api/next"); };
+$("rmEditLyr").onclick = () => { if (nowItem) openLyrics(nowItem.video_id); };
 $("rmFs").onclick = () => setPlayer({ fullscreen: !fullscreen });
 $("rmStart").onclick = () => setPlayer({ started: true });
+
+// ---------------- lyrics editor ----------------
+// Lyrics found online (LRCLIB) or pasted are matched to what the AI heard, so
+// the words are right and the timing still follows the singing.
+let lyrSong = null, lyrFound = [], lyrChosen = null;
+const lrcToPlain = (t) => t.split("\n").map((l) => l.replace(/\[[^\]]*\]/g, "").trim()).filter(Boolean).join("\n");
+
+function lyrSourceText(d) {
+  const i = d.source_info || {};
+  const pct = i.match != null ? ` · ${Math.round(i.match * 100)}% matched the singing` : "";
+  const low = i.match != null && i.match < 0.3 && d.has_ai;
+  const t = d.source === "lrclib" ? `Now: lyrics from LRCLIB (${i.track || "?"} – ${i.artist || "?"})${pct}`
+    : d.source === "pasted" ? `Now: pasted lyrics${pct}`
+    : d.source === "ai" ? "Now: the AI's lyrics (words can be wrong)"
+    : d.source === "skipped" ? "Lyrics were skipped for this song" : "No lyrics yet";
+  return { text: t + (low ? " — low, timing may be off" : ""), warn: low };
+}
+
+async function openLyrics(id) {
+  lyrSong = null; lyrFound = []; lyrChosen = null;
+  $("lyrWhat").textContent = "Loading…"; $("lyrSrc").textContent = ""; $("lyrRes").innerHTML = "";
+  $("lyrText").value = ""; $("lyrMsg").textContent = ""; $("lyrMsg").className = "msg";
+  $("lyrModal").classList.remove("hidden");
+  try {
+    const r = await fetch(`/api/lyrics/${id}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not load the lyrics");
+    lyrSong = d;
+    $("lyrWhat").textContent = d.title || id;
+    const src = lyrSourceText(d);
+    $("lyrSrc").textContent = src.text; $("lyrSrc").classList.toggle("warn", src.warn);
+    $("lyrText").value = d.text;
+    $("lyrQ").value = d.query || "";
+    $("lyrAI").classList.toggle("hidden", !d.has_ai || d.source === "ai");
+    findLyrics();                                   // show what LRCLIB has straight away
+  } catch (err) { $("lyrMsg").className = "msg err"; $("lyrMsg").textContent = err.message; }
+}
+
+async function findLyrics() {
+  if (!lyrSong) return;
+  const id = lyrSong.video_id;
+  $("lyrRes").innerHTML = `<div class="lyrsrc">Searching lrclib.net…</div>`;
+  $("lyrFind").disabled = true;
+  try {
+    const r = await fetch(`/api/lyrics/${id}/search?q=${encodeURIComponent($("lyrQ").value.trim())}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Search failed");
+    if (!lyrSong || lyrSong.video_id !== id) return;
+    lyrFound = d;
+    renderLyrResults();
+  } catch (err) {
+    $("lyrRes").innerHTML = `<div class="lyrsrc" style="color:var(--err)">${esc(err.message)}</div>`;
+  } finally { $("lyrFind").disabled = false; }
+}
+
+function renderLyrResults() {
+  if (!lyrFound.length) { $("lyrRes").innerHTML = `<div class="lyrsrc">Nothing found online. Try other words, or paste the lyrics below.</div>`; return; }
+  $("lyrRes").innerHTML = lyrFound.map((c, i) => `<div class="lres${lyrChosen && lyrChosen.id === c.id ? " on" : ""}">
+      <div><b title="${esc(c.track)}">${esc(c.track)}</b>
+        <span>${esc(c.artist)}${c.duration ? " · " + fmtDur(c.duration) : ""} · ${c.synced ? "timed" : "text only"}${c.likely ? " · best match" : ""}</span></div>
+      <button type="button" data-li="${i}">${lyrChosen && lyrChosen.id === c.id ? "Chosen" : "Use"}</button></div>`).join("");
+}
+$("lyrRes").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-li]"); if (!b) return;
+  const c = lyrFound[+b.dataset.li]; if (!c) return;
+  lyrChosen = { id: c.id, plain: lrcToPlain(c.text), query: $("lyrQ").value.trim() };
+  $("lyrText").value = lyrChosen.plain;
+  $("lyrMsg").className = "msg"; $("lyrMsg").textContent = "Check the words, then press Save & sync.";
+  renderLyrResults();
+});
+$("lyrFind").onclick = findLyrics;
+$("lyrQ").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); findLyrics(); } });
+
+async function saveLyrics(body) {
+  if (!lyrSong) return;
+  $("lyrSave").disabled = true; $("lyrAI").disabled = true;
+  $("lyrMsg").className = "msg"; $("lyrMsg").textContent = "Matching the lyrics to the singing…";
+  try {
+    const r = await fetch(`/api/lyrics/${lyrSong.video_id}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not save");
+    const pct = d.match != null ? `, ${Math.round(d.match * 100)}% matched the singing` : "";
+    const text = body.use_ai ? "Switched back to the AI's lyrics." : `Lyrics saved: ${d.lines} lines${pct}.`;
+    toast(text);
+    closeLyrics();
+    loadHistory(); poll();
+  } catch (err) { $("lyrMsg").className = "msg err"; $("lyrMsg").textContent = err.message; }
+  finally { $("lyrSave").disabled = false; $("lyrAI").disabled = false; }
+}
+$("lyrSave").onclick = () => {
+  const text = $("lyrText").value.trim();
+  if (!text) { $("lyrMsg").className = "msg err"; $("lyrMsg").textContent = "Pick lyrics found online, or paste them first."; return; }
+  // Unchanged online lyrics: send the entry itself, which keeps its line timestamps.
+  saveLyrics(lyrChosen && text === lyrChosen.plain ? { lrclib_id: lyrChosen.id, query: lyrChosen.query } : { text });
+};
+$("lyrAI").onclick = () => saveLyrics({ use_ai: true });
+const closeLyrics = () => { $("lyrModal").classList.add("hidden"); lyrSong = null; };
+$("lyrClose").onclick = closeLyrics;
 
 // Invite: show a big QR code on this phone for others to scan. It only joins
 // (start=0); the TV's own code is the one that also starts the TV.

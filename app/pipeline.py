@@ -112,6 +112,14 @@ def run_ffmpeg(*args: str):
         raise RuntimeError(f"ffmpeg failed: {r.stderr.strip()[-400:]}")
 
 
+def _save_ai_lyrics(out: Path, lyrics: dict):
+    """lyrics.json is what the TV shows; whisper.json keeps Whisper's own
+    result, so other lyric text can be timed against it later."""
+    text = json.dumps(lyrics, ensure_ascii=False)
+    (out / "lyrics.json").write_text(text, encoding="utf-8")
+    (out / "whisper.json").write_text(text, encoding="utf-8")
+
+
 def split_lines(segments: list[dict], max_words: int = 8, max_chars: int = 16, gap: float = 0.7) -> list[dict]:
     """Whisper segments can be long. Break them into karaoke-sized lines at
     pauses, or when a line gets too long (chars for CJK, words otherwise)."""
@@ -376,9 +384,12 @@ class RealPipeline:
             segs.append({"words": [{"w": w.word, "s": round(w.start, 3), "e": round(w.end, 3)} for w in s.words]})
         if not job.language:
             job.language = info.language
-        lyrics = {"language": info.language, "lines": split_lines(segs)}
-        (out / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False), encoding="utf-8")
+        lyrics = {"language": info.language, "lines": split_lines(segs), "source": "ai"}
+        _save_ai_lyrics(out, lyrics)
         (out / "vocals.wav").unlink(missing_ok=True)
+        # Real lyric text from LRCLIB, timed with Whisper's words (if found).
+        from . import lyrics_sync
+        lyrics_sync.auto_online(out, job.title or "", dur, job.lyrics_query)
 
 
 def _tag_voices(job, out: Path, tagger):
@@ -442,8 +453,10 @@ class MockPipeline:
             w = self.WORDS[i % len(self.WORDS)]
             words.append({"w": " " + w, "s": round(t, 2), "e": round(t + 0.4, 2)})
             t += 0.5 + (0.9 if i % 8 == 7 else 0)   # pause after every 8 words
-        lyrics = {"language": "en", "lines": split_lines([{"words": words}], max_words=8)}
-        (out / "lyrics.json").write_text(json.dumps(lyrics), encoding="utf-8")
+        lyrics = {"language": "en", "lines": split_lines([{"words": words}], max_words=8), "source": "ai"}
+        _save_ai_lyrics(out, lyrics)
+        from . import lyrics_sync
+        lyrics_sync.auto_online(out, job.title or "", job.duration, job.lyrics_query)
         (out / "vocals.wav").unlink(missing_ok=True)
         (out / "vocals16k.flac").write_bytes(b"")   # stands in for the kept 16 kHz vocals
 

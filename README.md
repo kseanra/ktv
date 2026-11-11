@@ -12,6 +12,7 @@ app/
   jobs.py      job queue: dedup cache, priorities, worker pools  <- the concurrency part
   pipeline.py  the stages: yt-dlp download, vocal separation, faster-whisper lyrics
   separators.py vocal separators: MDX-Net on OpenVINO (default) and Demucs
+  lyrics_sync.py real lyrics from LRCLIB / pasted, timed with Whisper's words
 tools/
   bench_separation.py  compare separation speed/quality on a downloaded song
   server.py    FastAPI: shared playlist + processing API + media files
@@ -228,18 +229,49 @@ the full mix) with word timestamps and voice-activity filtering. Long segments
 are split into karaoke-sized lines at pauses. Use the − / + buttons if the
 lyrics run early or late.
 
+**Correct lyric text (LRCLIB / pasted).** Whisper often mishears sung
+Cantonese, but its *timing* is good. So after Whisper, the song is looked up
+on [LRCLIB](https://lrclib.net) (free, open lyrics database, no API key),
+using the video title. If an entry clearly belongs to the song (same song
+name, and the singer is in the title or the length matches), its text is
+lined up character by character with what Whisper heard: characters count as
+the same when they are written the same (Simplified = Traditional) or *sound*
+the same in Cantonese (Jyutping), so most of Whisper's homophone mistakes
+still give exact timing. Characters in between are spread evenly; LRCLIB's
+line timestamps (shifted to the video) place lines Whisper missed. If under
+20% of the text matches the singing, it's treated as the wrong song and
+Whisper's lyrics stay.
+
+Video titles are often too messy to find the song. The **Add** popup has an
+optional *Song name for finding lyrics* box (e.g. `富士山下 陳奕迅`, song
+name then singer): that name is searched first and trusted. It is also tried
+as song name + singer (both ways round) and in Traditional characters, and is
+remembered for the song. Adding a song that was processed before with a name
+looks its lyrics up again straight away (if it still has the AI's lyrics).
+
+To fix any song by hand: **Lyrics** in History, or **Fix lyrics** on the
+phone Dashboard (song on the TV). It shows LRCLIB results for the song (edit
+the search if needed), or paste lyrics from anywhere (plain lines, or LRC with
+`[mm:ss.xx]` times), then **Save & sync**. The TV picks up the new lyrics
+within a second, duet M/F tags are redone, and *Use the AI's lyrics instead*
+switches back (Whisper's result is kept in `whisper.json`). Set
+`KARAOKE_LYRICS_ONLINE=0` to turn the automatic lookup off.
+
 ## API
 
 | Method | Path | |
 |---|---|---|
-| POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?}` add to playlist (`url` may be a bare video ID) |
+| POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?, lyrics_query?}` add to playlist (`url` may be a bare video ID) |
 | POST | `/api/next` | finish current song |
 | POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size |
-| POST | `/api/playlist/{i}/remove`, `/up` | edit playlist |
+| POST | `/api/playlist/{i}/remove`, `/top` (play next), `/up` (one place up) | edit playlist (`?video_id=` guards against a changed list) |
 | GET | `/api/state` | playlist + queue status (the page polls this every second) |
 | POST | `/api/process` | `{url, language?, priority?, skip_lyrics?}` process without the playlist |
 | GET | `/api/join`, `/qr.svg?start=1\|0` | address phones should open, and its QR code (start=1 also starts the TV) |
 | GET | `/api/search?q=...&limit=30` | YouTube search: `[{video_id, title, channel, duration, views, thumbnail, ready, in_playlist}]` |
+| GET | `/api/lyrics/{id}` | current lyrics as text + where they came from |
+| GET | `/api/lyrics/{id}/search?q=` | LRCLIB results for the song (best first) |
+| POST | `/api/lyrics/{id}` | `{text?}` paste, `{lrclib_id?}` use an LRCLIB entry, or `{use_ai: true}` |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |
 | GET | `/api/jobs`, `/api/jobs/{id}` | job status |

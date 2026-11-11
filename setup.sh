@@ -110,7 +110,7 @@ fi
 info "checking the installation"
 # Each library is imported in its own process: on Intel Macs, PyTorch and
 # Whisper must never be loaded together (see above).
-mods=(fastapi uvicorn yt_dlp faster_whisper openvino soundfile imageio_ffmpeg truststore certifi segno)
+mods=(fastapi uvicorn yt_dlp faster_whisper openvino soundfile imageio_ffmpeg truststore certifi segno opencc ToJyutping)
 [[ "$ARCH" == arm64 ]] && mods+=(torch demucs)
 problems=0
 for m in $mods; do
