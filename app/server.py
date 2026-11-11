@@ -102,6 +102,7 @@ class AddSong(BaseModel):
     skip_lyrics: bool = False     # True = only remove vocals (faster), no lyrics
     duet: bool = False            # male + female duet: tag lyric lines M / F
     lyrics_query: str | None = None  # song name (+ singer) to look the lyrics up by
+    redo_lyrics: bool = False     # song processed before: redo its lyrics with these options
 
 
 class PlayerUpdate(BaseModel):
@@ -182,6 +183,20 @@ def add_to_playlist(body: AddSong):
     if not vid:
         raise HTTPException(400, "not a YouTube link")
     query = (body.lyrics_query or "").strip()
+    old = manager.jobs.get(vid)
+    if body.redo_lyrics and not body.skip_lyrics and old and old.status == "done":
+        # Processed before: run the AI lyrics again with the new language,
+        # lyrics name and duet setting (download and vocal removal are kept).
+        redo = "started"
+        try:
+            manager.redo_lyrics(vid, body.language, duet=body.duet, lyrics_query=query)
+            if query:
+                _save_query(config.DATA_DIR / vid, query)
+        except ValueError as e:
+            redo = str(e)
+        playlist.append({"video_id": vid, "singer": (body.singer or "").strip()[:20]})
+        reprioritize()
+        return {"added": vid, "position": len(playlist) - 1, "job": old.public(), "redo": redo}
     job = manager.submit(vid, f"https://www.youtube.com/watch?v={vid}", body.language,
                          priority=len(playlist), skip_lyrics=body.skip_lyrics, duet=body.duet,
                          lyrics_query=query)
@@ -383,6 +398,13 @@ def get_lyrics(video_id: str):
         "source_info": lyr.get("source_info") or {},
         "text": "\n".join(ln.get("text", "") for ln in lyr.get("lines", [])),
         "has_ai": lyrics_sync.whisper_lyrics(d) is not None,
+        # "Redo AI lyrics" needs the saved vocals
+        # "Redo AI lyrics" uses the saved vocals, or separates them again from the video
+        "can_redo": (d / "video.mp4").exists(),
+        "redo_slow": not ((d / "vocals.wav").exists() or ((d / "vocals16k.flac").exists()
+                                                       and ((d / "vocals16k.flac").stat().st_size > 0 or config.MOCK))),
+        "ai_language": (_read_json(d / "whisper.json") or lyr).get("asked")
+                       or (manager.jobs.get(video_id) and manager.jobs[video_id].language) or "auto",
         "query": _read_json(d / "meta.json").get("lyrics_query")
                  or (manager.jobs.get(video_id) and manager.jobs[video_id].lyrics_query)
                  or (lyrics_sync.guess_queries(title) or [title])[0],
@@ -416,6 +438,25 @@ async def search_lyrics(video_id: str, q: str = ""):
     return [{"id": c["id"], "track": c["track"], "artist": c["artist"], "album": c["album"],
              "duration": c["duration"], "synced": bool(c["synced"]), "likely": c["score"] >= 4,
              "text": lyrics_sync.candidate_text(c)} for c in found[:15]]
+
+
+class LyricsRedo(BaseModel):
+    language: str | None = None    # "yue" = Cantonese (Cantonese model), None = auto, or zh / en ...
+
+
+@app.post("/api/lyrics/{video_id}/redo")
+def redo_lyrics(video_id: str, body: LyricsRedo):
+    """Run the AI lyrics again in another language, on the saved vocals.
+    Lyrics found online or pasted keep their text and get the new timing."""
+    _song_dir(video_id)
+    lang = (body.language or "").strip() or None
+    if lang and not re.fullmatch(r"[a-z]{2,3}", lang):
+        raise HTTPException(400, "bad language")
+    try:
+        job = manager.redo_lyrics(video_id, lang)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "job": job.public()}
 
 
 class LyricsUpdate(BaseModel):

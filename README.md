@@ -242,6 +242,32 @@ line timestamps (shifted to the video) place lines Whisper missed. If under
 20% of the text matches the singing, it's treated as the wrong song and
 Whisper's lyrics stay.
 
+**AI lyrics language (Cantonese model).** In the Add popup, lyrics found
+online come first: enter the song name and the language choice is hidden. With
+the name box empty, the popup shows the language the AI writes the lyrics in:
+Auto-detect, Cantonese, Mandarin, English, Japanese, Korean (remembered per
+phone; still used for the timing when a name is given). **Cantonese** songs use a Whisper model trained on
+Cantonese, `alvanlii/whisper-small-cantonese` (same size and speed as
+`small`; downloaded once, about 500 MB, on first use). Change it with
+`KARAOKE_WHISPER_MODEL_CANTONESE`:
+`JackyHoCL/whisper-large-v3-turbo-cantonese-yue-english-ct2` (most accurate,
+handles English mixed in, about 3-5x slower on a CPU) or `large-v3-turbo`
+(standard model); empty = use the main model. If the Cantonese model can't be
+loaded, the main model is used. Both models stay loaded once used.
+
+**Redo AI lyrics**: the Lyrics window has *Redo the AI lyrics as …* to run
+the lyrics step again in another language, on the saved vocals (no new
+download or vocal removal). Lyrics found online or pasted keep their words and
+get timed with the new AI result. Songs processed before the vocals were kept
+get them back first by separating the downloaded video again (a few minutes;
+the backing track is left as it is).
+
+Adding a song that is already in the library (History, or a search result
+marked *ready*) shows **Redo lyrics** in the Add popup. Ticked, the song's
+lyrics are redone with the popup's options: AI lyrics language, duet tags on or
+off, and the lyrics name (a new name looks the lyrics up online again first;
+without one, lyrics found online or pasted before are kept and re-timed).
+
 Video titles are often too messy to find the song. The **Add** popup has an
 optional *Song name for finding lyrics* box (e.g. `富士山下 陳奕迅`, song
 name then singer): that name is searched first and trusted. It is also tried
@@ -261,7 +287,7 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 
 | Method | Path | |
 |---|---|---|
-| POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?, lyrics_query?}` add to playlist (`url` may be a bare video ID) |
+| POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?, lyrics_query?, redo_lyrics?}` add to playlist (`url` may be a bare video ID) |
 | POST | `/api/next` | finish current song |
 | POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size |
 | POST | `/api/playlist/{i}/remove`, `/top` (play next), `/up` (one place up) | edit playlist (`?video_id=` guards against a changed list) |
@@ -271,6 +297,7 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 | GET | `/api/search?q=...&limit=30` | YouTube search: `[{video_id, title, channel, duration, views, thumbnail, ready, in_playlist}]` |
 | GET | `/api/lyrics/{id}` | current lyrics as text + where they came from |
 | GET | `/api/lyrics/{id}/search?q=` | LRCLIB results for the song (best first) |
+| POST | `/api/lyrics/{id}/redo` | `{language?}` run the AI lyrics again (`yue` = Cantonese model, empty = auto) |
 | POST | `/api/lyrics/{id}` | `{text?}` paste, `{lrclib_id?}` use an LRCLIB entry, or `{use_ai: true}` |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |

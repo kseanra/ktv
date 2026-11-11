@@ -31,6 +31,16 @@ MODEL_WORKERS = int(os.environ.get("KARAOKE_MODEL_WORKERS", "1"))
 # faster-whisper model: tiny / base / small / medium / large-v3.
 # "small" is a reasonable CPU default; use "large-v3" on a GPU for Cantonese.
 WHISPER_MODEL = os.environ.get("KARAOKE_WHISPER_MODEL", "small")
+# Model used for songs whose lyrics language is set to Cantonese. Downloaded
+# on first use. Any CTranslate2 Whisper model works, written as a size name,
+# a folder, a Hugging Face repo, or "repo:subfolder". Choices:
+#   alvanlii/whisper-small-cantonese:cts   (default) same size and speed as
+#        "small", trained on ~900 h of Cantonese
+#   JackyHoCL/whisper-large-v3-turbo-cantonese-yue-english-ct2   most accurate,
+#        also English mixed in; about 3-5x slower on a CPU, 1.6 GB
+#   large-v3-turbo   standard model with a real Cantonese setting
+# Empty = use WHISPER_MODEL for Cantonese too.
+WHISPER_MODEL_CANTONESE = os.environ.get("KARAOKE_WHISPER_MODEL_CANTONESE", "alvanlii/whisper-small-cantonese:cts")
 # Vocal separation engine:
 #   "mdx"    UVR MDX-Net vocal model on Intel OpenVINO (default). About 2x faster
 #            than Demucs on CPU, and can use an Intel Arc / integrated GPU.

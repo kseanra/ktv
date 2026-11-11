@@ -551,7 +551,8 @@ def apply_text(out: Path, text: str, duration: float | None, source: dict,
     if min_match is not None and words and stats["match"] < min_match:
         raise ValueError(f"only {stats['match']:.0%} matched what is sung")
     lyrics = {"language": ai.get("language"), "lines": lines, "source": source.get("kind", "pasted"),
-              "source_info": {**source, **stats}}
+              "source_info": {**source, **stats},
+              "source_text": text}          # kept, so it can be re-timed after "Redo AI lyrics"
     (out / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False), encoding="utf-8")
     log.info("lyrics for %s from %s: %d lines, %.0f%% matched", out.name, lyrics["source"], len(lines), stats["match"] * 100)
     return stats
@@ -564,6 +565,26 @@ def use_ai(out: Path) -> bool:
         return False
     (out / "lyrics.json").write_text(json.dumps(ai, ensure_ascii=False), encoding="utf-8")
     return True
+
+
+def after_ai(out: Path, title: str, duration: float | None, query: str | None, previous: dict,
+             fresh: bool = False):
+    """Run after Whisper. Lyrics chosen before (online or pasted) keep their
+    text and get re-timed with the new AI words; otherwise look online.
+    fresh: a new lyrics name was given, so look online with it first (the
+    previous lyrics are only kept if nothing is found)."""
+    if fresh and query and auto_online(out, title, duration, query):
+        return True
+    if previous.get("source") in ("lrclib", "pasted") and previous.get("lines"):
+        text = previous.get("source_text") or "\n".join(ln.get("text", "") for ln in previous["lines"])
+        src = {k: v for k, v in (previous.get("source_info") or {}).items()
+               if k in ("kind", "id", "track", "artist", "synced")}
+        src.setdefault("kind", previous["source"])
+        try:
+            return apply_text(out, text, duration, src)
+        except Exception as e:  # noqa: BLE001
+            log.info("could not re-time the previous lyrics of %s: %s", out.name, e)
+    return auto_online(out, title, duration, query)
 
 
 def auto_online(out: Path, title: str, duration: float | None, query: str | None = None) -> dict | None:

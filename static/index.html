@@ -122,6 +122,12 @@
   .addbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
   .addbtns button { width: 100%; }
   .lyrq { display: grid; gap: 6px; font-size: 14px; }
+  .redo { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+  .redo-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  .redo-row span { flex-basis: 100%; }
+  .redo-row select { flex: 1; min-width: 0; }
+  .modal-card .redo-row button { padding: 8px 16px; font-size: 14px; }
+  .redo small { color: var(--dim); font-size: 12px; }
   .lyrq small { color: var(--dim); font-size: 12px; }
   /* lyrics editor */
   .lyrcard { max-height: calc(100dvh - 32px); overflow-y: auto; gap: 10px; width: min(560px, 100%); }
@@ -303,17 +309,7 @@
     </div>
     <form id="addForm">
       <input id="url" type="search" enterkeyhint="search" placeholder="Song name or YouTube link" autocomplete="off" required>
-      <div class="row">
-        <input id="singer" placeholder="Your name (optional)" maxlength="20">
-        <select id="lang" title="Song language: helps the lyrics recogniser">
-          <option value="">Language: auto</option>
-          <option value="yue">Cantonese</option>
-          <option value="zh">Mandarin</option>
-          <option value="en">English</option>
-          <option value="ja">Japanese</option>
-          <option value="ko">Korean</option>
-        </select>
-      </div>
+      <input id="singer" placeholder="Your name (optional)" maxlength="20">
       <button class="primary" type="submit" id="addSubmit">Search YouTube</button>
       <div class="msg" id="msg"></div>
     </form>
@@ -351,9 +347,21 @@
       <span><b>Skip lyrics</b><small>Faster: vocal removal only, no lyrics on the TV</small></span></label>
     <label class="check opt"><input type="checkbox" id="duet">
       <span><b>Male + female duet</b><small>Tag each lyric line M or F</small></span></label>
-    <label class="lyrq" id="lyrQueryWrap"><span>Song name for finding lyrics <small>(optional)</small></span>
+    <label class="check opt hidden" id="redoWrap"><input type="checkbox" id="redoLyrics">
+      <span><b>Redo lyrics</b><small>Already in the library: run the AI lyrics again with the options below</small></span></label>
+    <label class="lyrq" id="lyrQueryWrap"><span>Lyrics: song name to find them online</span>
       <input id="lyrQuery" type="search" placeholder="e.g. 富士山下 陳奕迅" autocomplete="off" maxlength="100">
-      <small>Helps when the video title is messy. Song name, then singer.</small></label>
+      <small>Song name, then singer. Lyrics found online are always used first.</small></label>
+    <label class="lyrq" id="langWrap"><span>No song name: the AI writes the lyrics, in</span>
+      <select id="lang">
+          <option value="">Auto-detect</option>
+          <option value="yue">Cantonese 粵語</option>
+          <option value="zh">Mandarin 國語</option>
+          <option value="en">English</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+      </select>
+      <small>The video title is still tried online first. Cantonese uses a model trained on Cantonese. Remembered for next time.</small></label>
     <div class="addbtns"><button id="addCancel" type="button">Cancel</button><button class="primary" id="addConfirm" type="button">Add</button></div>
   </div>
 </div>
@@ -368,6 +376,19 @@
     <div class="msg" id="lyrMsg"></div>
     <div class="addbtns"><button id="lyrClose" type="button">Close</button><button class="primary" id="lyrSave" type="button">Save &amp; sync</button></div>
     <button id="lyrAI" type="button" class="linkbtn">Use the AI's lyrics instead</button>
+    <div class="redo" id="lyrRedo">
+      <div class="redo-row"><span>Redo the AI lyrics as</span>
+        <select id="redoLang">
+          <option value="">Auto-detect</option>
+          <option value="yue">Cantonese 粵語</option>
+          <option value="zh">Mandarin 國語</option>
+          <option value="en">English</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+        </select>
+        <button id="redoBtn" type="button">Redo</button></div>
+      <small id="redoNote">Takes a minute or two. Lyrics found online or pasted keep their words and get the new timing.</small>
+    </div>
   </div>
 </div>
 <div class="modal hidden" id="qrModal" role="dialog" aria-label="Invite QR code">
@@ -409,7 +430,19 @@ $("duet").checked = false;
 $("skipLyrics").addEventListener("change", () => { if ($("skipLyrics").checked) $("duet").checked = false; });
 $("duet").addEventListener("change", () => { if ($("duet").checked) $("skipLyrics").checked = false; syncLyrQuery(); });
 // No lyrics wanted: no name to look them up by.
-const syncLyrQuery = () => $("lyrQueryWrap").classList.toggle("hidden", $("skipLyrics").checked);
+const syncLyrQuery = () => {
+  const skip = $("skipLyrics").checked;
+  $("lyrQueryWrap").classList.toggle("hidden", skip);
+  // Lyrics found online come first: the AI language only shows when no song
+  // name is given (it is still used, hidden, for the timing). For a library
+  // song it only matters when its lyrics are redone.
+  const named = !!$("lyrQuery").value.trim();
+  $("langWrap").classList.toggle("hidden", skip || named || (pendingExisting && !$("redoLyrics").checked));
+  $("redoWrap").classList.toggle("hidden", !pendingExisting || skip);
+};
+$("redoLyrics").addEventListener("change", syncLyrQuery);
+$("lyrQuery").addEventListener("input", syncLyrQuery);
+$("lang").addEventListener("change", () => pref.set("lang", $("lang").value));
 $("skipLyrics").addEventListener("change", syncLyrQuery);
 
 async function addSong(url) {
@@ -420,13 +453,23 @@ async function addSong(url) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, singer: $("singer").value, language: $("lang").value || null,
                              skip_lyrics: $("skipLyrics").checked, duet: $("duet").checked,
-                             lyrics_query: $("skipLyrics").checked ? null : $("lyrQuery").value.trim() || null }),
+                             lyrics_query: $("skipLyrics").checked ? null : $("lyrQuery").value.trim() || null,
+                             redo_lyrics: pendingExisting && $("redoLyrics").checked }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "failed");
     const j = data.job;
     $("skipLyrics").checked = false;
     $("duet").checked = false;
+    if (data.redo) {
+      const okRedo = data.redo === "started";
+      msg.className = okRedo ? "msg" : "msg err";
+      msg.textContent = okRedo ? `Added. Redoing the lyrics of ${j.title || "the song"} in the background.`
+        : `Added, but the lyrics can't be redone: ${data.redo}`;
+      toast(msg.textContent, !okRedo);
+      poll(); if (currentTab === "history") loadHistory();
+      return true;
+    }
     msg.textContent = j.ready ? `Added: ${j.title || "song"} is ready to sing.`
       : !j.skip_lyrics && j.status.includes("transcribe") ? "Added. Extracting lyrics in the background."
       : "Added. Processing in the background.";
@@ -451,11 +494,19 @@ function toast(text, isErr = false) {
 // when "Add" is pressed, with the options chosen there.
 let pendingAdd = null;   // {url, onAdded}
 
-function openAddModal(url, label, onAdded, lyricsQuery = "") {
+let pendingExisting = false;
+// existing: the song is already processed (in the library). Then the popup
+// offers "Redo lyrics", and the language only matters when that is ticked.
+function openAddModal(url, label, onAdded, lyricsQuery = "", existing = false) {
   pendingAdd = { url, onAdded };
+  pendingExisting = existing;
+  $("redoLyrics").checked = false;
+  $("redoWrap").classList.toggle("hidden", !existing);
   $("addWhat").textContent = label;
   $("skipLyrics").checked = false; $("duet").checked = false;
   $("lyrQuery").value = lyricsQuery; $("lyrQueryWrap").classList.remove("hidden");
+  $("lang").value = pref.get("lang", "");
+  syncLyrQuery();
   $("addModal").classList.remove("hidden");
   $("addConfirm").focus();
 }
@@ -548,7 +599,7 @@ $("resultsList").addEventListener("click", (e) => {
   // find the lyrics too (editable in the popup). Once added, the search is done.
   openAddModal(r.video_id, r.title || r.video_id, (ok) => {
     if (ok) { $("url").value = ""; updateSubmitLabel(); clearResults(); }
-  }, resultsQuery);
+  }, resultsQuery, !!r.ready);
 });
 function clearResults() {
   ++searchSeq;                              // a search still running is ignored
@@ -642,7 +693,8 @@ $("histList").addEventListener("click", async (e) => {
   const h = histItems.find((x) => x.video_id === b.dataset.add);
   // After adding, the list redraws with an "in playlist" tag on this song.
   // the name its lyrics were looked up by before, if any
-  openAddModal(b.dataset.add, (h && h.title) || b.dataset.add, null, (h && h.lyrics_query) || "");
+  openAddModal(b.dataset.add, (h && h.title) || b.dataset.add, null, (h && h.lyrics_query) || "",
+               !!(h && h.has_audio));
 });
 setInterval(() => { if (currentTab === "history") loadHistory(); }, 5000);
 loadHistory();
@@ -1008,6 +1060,12 @@ async function openLyrics(id) {
     $("lyrText").value = d.text;
     $("lyrQ").value = d.query || "";
     $("lyrAI").classList.toggle("hidden", !d.has_ai || d.source === "ai");
+    $("lyrRedo").classList.toggle("hidden", !d.can_redo);
+    // Suggest the other choice: Cantonese if it was auto (or other), else auto.
+    $("redoLang").value = d.ai_language === "yue" ? "" : "yue";
+    $("redoNote").textContent = `Last AI run: ${langName(d.ai_language)}. ` + (d.redo_slow
+      ? "This song's vocals weren't kept, so they are separated from the video again first: takes a few minutes. "
+      : "Takes a minute or two. ") + "Lyrics found online or pasted keep their words and get the new timing.";
     findLyrics();                                   // show what LRCLIB has straight away
   } catch (err) { $("lyrMsg").className = "msg err"; $("lyrMsg").textContent = err.message; }
 }
@@ -1071,6 +1129,21 @@ $("lyrSave").onclick = () => {
   saveLyrics(lyrChosen && text === lyrChosen.plain ? { lrclib_id: lyrChosen.id, query: lyrChosen.query } : { text });
 };
 $("lyrAI").onclick = () => saveLyrics({ use_ai: true });
+const langName = (v) => ({ "": "auto-detect", auto: "auto-detect", yue: "Cantonese", zh: "Mandarin", en: "English", ja: "Japanese", ko: "Korean" })[v ?? ""] || v;
+$("redoBtn").onclick = async () => {
+  if (!lyrSong) return;
+  const lang = $("redoLang").value;
+  $("redoBtn").disabled = true;
+  try {
+    const r = await fetch(`/api/lyrics/${lyrSong.video_id}/redo`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: lang || null }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not redo the lyrics");
+    toast(`Redoing the AI lyrics (${langName(lang)})… about a minute or two.`);
+    closeLyrics(); poll(); loadHistory();
+  } catch (err) { $("lyrMsg").className = "msg err"; $("lyrMsg").textContent = err.message; }
+  finally { $("redoBtn").disabled = false; }
+};
 const closeLyrics = () => { $("lyrModal").classList.add("hidden"); lyrSong = null; };
 $("lyrClose").onclick = closeLyrics;
 

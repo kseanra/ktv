@@ -112,6 +112,31 @@ def run_ffmpeg(*args: str):
         raise RuntimeError(f"ffmpeg failed: {r.stderr.strip()[-400:]}")
 
 
+def _read_lyrics(out: Path) -> dict:
+    try:
+        return json.loads((out / "lyrics.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def resolve_whisper_model(spec: str) -> str:
+    """Model name for faster-whisper. A size name ("small") or folder passes
+    through; "owner/repo" or "owner/repo:subfolder" is downloaded from Hugging
+    Face (once, into its cache) and the folder holding model.bin is returned."""
+    if "/" not in spec or Path(spec).exists():
+        return spec
+    repo, _, sub = spec.partition(":")
+    if not sub:
+        return repo                     # faster-whisper downloads a CTranslate2 repo itself
+    from huggingface_hub import snapshot_download
+    root = Path(snapshot_download(repo, allow_patterns=[f"{sub}/*"]))
+    base = root / sub
+    for p in [base, *sorted(x for x in base.rglob("*") if x.is_dir())]:
+        if (p / "model.bin").exists():
+            return str(p)
+    raise RuntimeError(f"no CTranslate2 model (model.bin) under {sub}/ in {repo}")
+
+
 def _save_ai_lyrics(out: Path, lyrics: dict):
     """lyrics.json is what the TV shows; whisper.json keeps Whisper's own
     result, so other lyric text can be timed against it later."""
@@ -155,7 +180,7 @@ class RealPipeline:
     def __init__(self):
         self._lock = threading.Lock()
         self._demucs = None
-        self._whisper = None
+        self._whispers: dict[str, object] = {}   # model spec -> loaded WhisperModel
         self._device = None
 
     # ---------- model loading (once, shared by all worker threads) ----------
@@ -228,28 +253,34 @@ class RealPipeline:
             log.warning("GPU not usable (%s), using CPU", e)
             return cpu
 
-    def whisper(self):
+    def whisper(self, spec: str | None = None):
+        """A Whisper model, loaded on first use and then kept (the main model
+        and the Cantonese one can both be loaded; each is a few hundred MB)."""
+        spec = spec or config.WHISPER_MODEL
         with self._lock:
-            if self._whisper is None:
+            if spec not in self._whispers:
                 from faster_whisper import WhisperModel
+                path = resolve_whisper_model(spec)
                 dev = self.device()
+                m = None
                 if dev == "cuda":
                     # An NVIDIA card without NVIDIA's CUDA libraries (cuBLAS/cuDNN)
                     # is detected but fails on first use. Try it on one second of
                     # silence and fall back to the CPU if it doesn't work.
                     try:
-                        log.info("loading Whisper model %s (cuda, float16) ...", config.WHISPER_MODEL)
-                        m = WhisperModel(config.WHISPER_MODEL, device="cuda", compute_type="float16")
+                        log.info("loading Whisper model %s (cuda, float16) ...", spec)
+                        m = WhisperModel(path, device="cuda", compute_type="float16")
                         import numpy as np
                         list(m.transcribe(np.zeros(16000, np.float32), language="en")[0])
-                        self._whisper = m
                     except Exception as e:  # noqa: BLE001
                         log.warning("Whisper can't use the GPU (%s); using the CPU instead", e)
                         self._device = dev = "cpu"
-                if self._whisper is None:
-                    log.info("loading Whisper model %s (%s, int8) ...", config.WHISPER_MODEL, dev)
-                    self._whisper = WhisperModel(config.WHISPER_MODEL, device=dev, compute_type="int8")
-        return self._whisper
+                        m = None
+                if m is None:
+                    log.info("loading Whisper model %s (%s, int8) ...", spec, dev)
+                    m = WhisperModel(path, device=dev, compute_type="int8")
+                self._whispers[spec] = m
+            return self._whispers[spec]
 
     # ---------- stage 1: download ----------
     def download(self, job, out: Path):
@@ -339,30 +370,46 @@ class RealPipeline:
             sf.write(out / f"{name}.wav", np.clip(arr.T, -1.0, 1.0), sr)
 
         save(vocals, "vocals")
-        save(instrumental, "instrumental")
-        # The browser streams a compressed copy of the instrumental.
-        run_ffmpeg("-i", str(out / "instrumental.wav"), "-b:a", "192k", str(out / "instrumental.mp3"))
-        (out / "instrumental.wav").unlink(missing_ok=True)
+        if getattr(job, "vocals_only", False) and (out / "instrumental.mp3").exists():
+            # Only the vocals were needed (to redo the lyrics): keep the backing
+            # track as it is (it may be playing on the TV right now).
+            job.vocals_only = False
+        else:
+            save(instrumental, "instrumental")
+            # The browser streams a compressed copy of the instrumental.
+            run_ffmpeg("-i", str(out / "instrumental.wav"), "-b:a", "192k", str(out / "instrumental.mp3"))
+            (out / "instrumental.wav").unlink(missing_ok=True)
         (out / "audio.wav").unlink(missing_ok=True)
 
     # ---------- stage 3: lyrics ----------
     def transcribe(self, job, out: Path):
         import soundfile as sf
 
-        model = self.whisper()
+        language = job.language
+        # Cantonese songs use the Cantonese model (if one is set and it loads).
+        spec = config.WHISPER_MODEL
+        if language == "yue" and config.WHISPER_MODEL_CANTONESE:
+            try:
+                self.whisper(config.WHISPER_MODEL_CANTONESE)
+                spec = config.WHISPER_MODEL_CANTONESE
+            except Exception as e:  # noqa: BLE001
+                log.warning("Cantonese model %s not available (%s); using %s",
+                            config.WHISPER_MODEL_CANTONESE, e, config.WHISPER_MODEL)
+        model = self.whisper(spec)
         # Decode with our own ffmpeg to 16 kHz mono and pass the samples in
         # directly. (faster-whisper's built-in decoder breaks with PyAV >= 16.)
         # 16 kHz mono copy of the vocals. Kept (about 4 MB as FLAC) so duet
-        # voice tags can be added later without redoing vocal removal.
-        run_ffmpeg("-i", str(out / "vocals.wav"), "-ac", "1", "-ar", "16000", str(out / "vocals16k.flac"))
+        # voice tags and "Redo AI lyrics" work later without redoing vocal removal.
+        if (out / "vocals.wav").exists():
+            run_ffmpeg("-i", str(out / "vocals.wav"), "-ac", "1", "-ar", "16000", str(out / "vocals16k.flac"))
         audio, _ = sf.read(out / "vocals16k.flac", dtype="float32")
-        language = job.language
         if language == "yue" and model.hf_tokenizer.token_to_id("<|yue|>") is None:
             # Only large-v3 models know Cantonese. Smaller ones have no "yue"
             # token: asking for it silently breaks decoding (junk English like
             # "The JackINS", and very slow). Cantonese is written in Chinese
-            # characters, so ask for Chinese instead.
-            log.info("model %s has no Cantonese; transcribing %s as Chinese", config.WHISPER_MODEL, job.video_id)
+            # characters, so ask for Chinese instead (the Cantonese fine-tuned
+            # small model was trained this way).
+            log.info("model %s has no Cantonese token; transcribing %s as Chinese", spec, job.video_id)
             language = "zh"
         segments, info = model.transcribe(
             audio,
@@ -382,14 +429,15 @@ class RealPipeline:
             if not s.words:
                 continue
             segs.append({"words": [{"w": w.word, "s": round(w.start, 3), "e": round(w.end, 3)} for w in s.words]})
-        if not job.language:
-            job.language = info.language
-        lyrics = {"language": info.language, "lines": split_lines(segs), "source": "ai"}
+        previous = _read_lyrics(out)
+        lyrics = {"language": info.language, "lines": split_lines(segs), "source": "ai",
+                  "asked": job.language or "auto", "model": spec}
         _save_ai_lyrics(out, lyrics)
         (out / "vocals.wav").unlink(missing_ok=True)
-        # Real lyric text from LRCLIB, timed with Whisper's words (if found).
+        # Real lyric text (kept from before, or from LRCLIB), timed with Whisper's words.
         from . import lyrics_sync
-        lyrics_sync.auto_online(out, job.title or "", dur, job.lyrics_query)
+        lyrics_sync.after_ai(out, job.title or "", dur, job.lyrics_query, previous, fresh=job.fresh_lookup)
+        job.fresh_lookup = False
 
 
 def _tag_voices(job, out: Path, tagger):
@@ -442,8 +490,11 @@ class MockPipeline:
 
     def separate(self, job, out: Path):
         self._sleep(job, 4)
-        run_ffmpeg("-f", "lavfi", "-i", "sine=frequency=110:duration=30", "-ac", "2",
-                   "-b:a", "128k", str(out / "instrumental.mp3"))
+        if getattr(job, "vocals_only", False) and (out / "instrumental.mp3").exists():
+            job.vocals_only = False
+        else:
+            run_ffmpeg("-f", "lavfi", "-i", "sine=frequency=110:duration=30", "-ac", "2",
+                       "-b:a", "128k", str(out / "instrumental.mp3"))
         run_ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=30", "-ac", "2", str(out / "vocals.wav"))
 
     def transcribe(self, job, out: Path):
@@ -453,10 +504,13 @@ class MockPipeline:
             w = self.WORDS[i % len(self.WORDS)]
             words.append({"w": " " + w, "s": round(t, 2), "e": round(t + 0.4, 2)})
             t += 0.5 + (0.9 if i % 8 == 7 else 0)   # pause after every 8 words
-        lyrics = {"language": "en", "lines": split_lines([{"words": words}], max_words=8), "source": "ai"}
+        previous = _read_lyrics(out)
+        lyrics = {"language": "en", "lines": split_lines([{"words": words}], max_words=8), "source": "ai",
+                  "asked": job.language or "auto", "model": "mock"}
         _save_ai_lyrics(out, lyrics)
         from . import lyrics_sync
-        lyrics_sync.auto_online(out, job.title or "", job.duration, job.lyrics_query)
+        lyrics_sync.after_ai(out, job.title or "", job.duration, job.lyrics_query, previous, fresh=job.fresh_lookup)
+        job.fresh_lookup = False
         (out / "vocals.wav").unlink(missing_ok=True)
         (out / "vocals16k.flac").write_bytes(b"")   # stands in for the kept 16 kHz vocals
 

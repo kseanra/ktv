@@ -65,6 +65,8 @@ class Job:
     duet: bool = False             # tag lyric lines male / female
     has_voices: bool = False       # lyrics carry male / female tags
     lyrics_query: str = ""         # song name typed by the user for the lyrics lookup
+    fresh_lookup: bool = False     # next AI lyrics run: look online with lyrics_query first
+    vocals_only: bool = False      # separating again only to get the vocals back (keep the instrumental)
     created: float = field(default_factory=time.time)
     timings: dict = field(default_factory=dict)
 
@@ -192,6 +194,38 @@ class JobManager:
         if (out / "video.mp4").exists() and (out / "audio.wav").exists():
             return "separate"
         return "download"   # reuses video.mp4 if it is already there
+
+    def redo_lyrics(self, video_id: str, language: str | None, duet: bool | None = None,
+                    lyrics_query: str = "") -> Job:
+        """Run the AI lyrics step again (e.g. as Cantonese) on the saved vocals.
+        Download and vocal removal are not repeated."""
+        from . import config
+        job = self.jobs.get(video_id)
+        out = self.data_dir / video_id
+        flac = out / "vocals16k.flac"
+        has_vocals = (flac.exists() and (flac.stat().st_size > 0 or config.MOCK)) or (out / "vocals.wav").exists()
+        if not job or not (has_vocals or (out / "video.mp4").exists()):
+            raise ValueError("This song's files are missing. Delete it in History and add it again.")
+        if job.status.startswith(("running:", "waiting:")):
+            raise ValueError("This song is being processed right now. Try again when it has finished.")
+        job.language = language or None
+        job.skip_lyrics = False
+        job.has_voices = False
+        if duet is not None:
+            job.duet = duet                       # M/F tags are redone after the lyrics (or dropped)
+        lyrics_query = (lyrics_query or "").strip()[:100]
+        if lyrics_query:
+            job.lyrics_query = lyrics_query
+        job.fresh_lookup = bool(lyrics_query)
+        job.priority = 0
+        if has_vocals:
+            self._enqueue(job, "transcribe")
+        else:
+            # Older songs didn't keep their vocals: get them back from the
+            # downloaded video (no new download; the backing track is kept).
+            job.vocals_only = (out / "instrumental.mp3").exists()
+            self._enqueue(job, "download")
+        return job
 
     def set_priority(self, video_id: str, priority: int):
         job = self.jobs.get(video_id)
