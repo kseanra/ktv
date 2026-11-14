@@ -90,7 +90,13 @@
   body.remote[data-view="playlist"] #tabHistory,
   body.remote[data-view="history"] #nowCard,
   body.remote[data-view="history"] #addForm,
-  body.remote[data-view="history"] #tabPlaylist { display: none !important; }
+  body.remote[data-view="history"] #tabPlaylist,
+  body.remote[data-view="singers"] #nowCard,
+  body.remote[data-view="singers"] #addForm,
+  body.remote[data-view="singers"] #searchResults,
+  body.remote[data-view="singers"] #tabPlaylist,
+  body.remote[data-view="singers"] #tabHistory,
+  body.remote:not([data-view="singers"]) #tabSingers { display: none !important; }
   body.remote:not([data-view="dashboard"]) .tvlink { display: none; }
   .dashcard { margin: 12px 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px;
     align-items: center; gap: 12px; background: #1b1823; }
@@ -177,6 +183,26 @@
   .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
   .tabs .count { font-size: 11px; background: #2a2634; border-radius: 99px; padding: 1px 7px; margin-left: 4px; }
   .search { padding: 10px 8px 2px; }
+  /* singers (MusicBrainz catalogue) */
+  .sgview { display: contents; }
+  .chips { display: flex; gap: 6px; padding: 8px 8px 0; flex-wrap: wrap; }
+  .chips button { padding: 5px 12px; font-size: 13px; border-radius: 99px; }
+  .chips button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .sgbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px 0; font-size: 12px; color: var(--dim); }
+  .sgbar span { flex: 1; min-width: 0; }
+  .sgbar button { padding: 5px 12px; font-size: 13px; white-space: nowrap; }
+  .sgrow { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 10px; cursor: pointer; }
+  .sgrow:hover { background: #24212e; }
+  .sgrow > div { flex: 1; min-width: 0; }
+  .sgrow b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sgrow small { display: block; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sgrow .chev { color: var(--dim); font-size: 18px; }
+  .sghead { display: flex; align-items: center; gap: 8px; padding: 10px 8px 0; }
+  .sghead > div { flex: 1; min-width: 0; }
+  .sghead b { display: block; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sghead small { display: block; color: var(--dim); font-size: 12px; }
+  .sghead button { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
+  .more { display: block; margin: 8px auto 4px; padding: 7px 18px; font-size: 13px; }
   /* YouTube search results (Playlist tab on phones, side panel on the TV) */
   .results { border-bottom: 1px solid var(--line); padding: 4px 8px 8px; max-height: 50vh; overflow-y: auto; }
   body.remote .results { max-height: none; overflow: visible; }
@@ -320,6 +346,7 @@
     <div class="tabs">
       <button data-tab="playlist" class="on">Playlist <span class="count" id="plCount">0</span></button>
       <button data-tab="history">History <span class="count" id="histCount">0</span></button>
+      <button data-tab="singers">Singers</button>
     </div>
     <div id="tabPlaylist" style="display:contents">
       <div class="stats" id="stats"></div>
@@ -329,11 +356,30 @@
       <div class="search"><input id="histSearch" placeholder="Search songs" autocomplete="off"></div>
       <div class="list" id="histList"></div>
     </div>
+    <div id="tabSingers" class="hidden" style="display:contents">
+      <div class="sgview" id="singerListView">
+        <div class="search"><input id="sgSearch" type="search" placeholder="Search singers (中文 / English)" autocomplete="off"></div>
+        <div class="chips" id="sgRegions">
+          <button data-r="" class="on">All</button><button data-r="HK">香港 HK</button><button data-r="TW">台灣 TW</button><button data-r="CN">中國 CN</button><button data-r="MO">澳門 MO</button><button data-r="SG">新加坡 SG</button><button data-r="MY">馬來西亞 MY</button>
+        </div>
+        <div class="sgbar"><span id="sgInfo"></span><button id="sgUpdate" type="button" title="Download the Chinese singer list from MusicBrainz again">Update list</button></div>
+        <div class="list" id="sgList"></div>
+      </div>
+      <div class="sgview hidden" id="singerSongsView">
+        <div class="sghead"><button id="sgBack" type="button">‹ Singers</button>
+          <div><b id="sgName"></b><small id="sgSub"></small></div>
+          <button id="sgRefresh" type="button" title="Get this singer's songs from MusicBrainz again">↻</button></div>
+        <div class="search"><input id="songFilter" type="search" placeholder="Filter songs" autocomplete="off"></div>
+        <div class="chips" id="songSort"><button data-s="popular" class="on">Popular</button><button data-s="az">A–Z</button><button data-s="year">Newest</button></div>
+        <div class="list" id="songList"></div>
+      </div>
+    </div>
     <a class="tvlink" id="tvLink" href="/?tv">Use this device as the TV screen</a>
   </aside>
   <nav class="bottomnav" id="bottomNav" aria-label="Views">
     <button data-view="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z" fill="currentColor"/></svg>Dashboard</button>
     <button data-view="playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h12M4 12h12M4 18h8"/><path d="M19 15v6m-3-3h6"/></svg>Playlist<span class="nbadge hidden" id="navPlCount">0</span></button>
+    <button data-view="singers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Singers</button>
     <button data-view="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
   </nav>
   <div class="toast hidden" id="toast" role="status"></div>
@@ -616,18 +662,27 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
   $("tabPlaylist").classList.toggle("hidden", currentTab !== "playlist");
   $("tabHistory").classList.toggle("hidden", currentTab !== "history");
+  $("tabSingers").classList.toggle("hidden", currentTab !== "singers");
   if (currentTab === "history") loadHistory();
+  if (currentTab === "singers") showSingers();
 }));
+// Show the TV side panel's Playlist tab (used after picking a song from Singers).
+function showPlaylistTab() {
+  if (isRemote) { setView("playlist"); return; }
+  document.querySelector('.tabs button[data-tab="playlist"]').click();
+}
 
 // Phone view: the bottom tabs switch between Dashboard, Playlist and History.
 function setView(view) {
-  if (!["dashboard", "playlist", "history"].includes(view)) view = "dashboard";
+  if (!["dashboard", "playlist", "singers", "history"].includes(view)) view = "dashboard";
   document.body.dataset.view = view;
   document.querySelectorAll("#bottomNav button").forEach((b) => b.classList.toggle("on", b.dataset.view === view));
-  currentTab = view === "history" ? "history" : view === "playlist" ? "playlist" : "dashboard";
+  currentTab = ["history", "playlist", "singers"].includes(view) ? view : "dashboard";
   $("tabPlaylist").classList.toggle("hidden", view !== "playlist");
   $("tabHistory").classList.toggle("hidden", view !== "history");
+  $("tabSingers").classList.toggle("hidden", view !== "singers");
   if (view === "history") loadHistory();
+  if (view === "singers") showSingers();
   pref.set("view", view);
   window.scrollTo(0, 0);
 }
@@ -1026,6 +1081,208 @@ $("rmSkip").onclick = () => { if (confirmSkip()) post("/api/next"); };
 $("rmEditLyr").onclick = () => { if (nowItem) openLyrics(nowItem.video_id); };
 $("rmFs").onclick = () => setPlayer({ fullscreen: !fullscreen });
 $("rmStart").onclick = () => setPlayer({ started: true });
+
+// ---------------- singers (MusicBrainz catalogue, stored on the server) ----------------
+// Chinese singers from MusicBrainz. Tap a singer for songs (fetched once, then
+// kept); tap a song to search YouTube for "song singer". See decision.md.
+const fmtCount = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K" : String(n);
+const REGION_NAMES = { HK: "Hong Kong", TW: "Taiwan", CN: "Mainland China", MO: "Macau", SG: "Singapore", MY: "Malaysia" };
+let sg = { q: "", region: "", items: [], total: 0, loaded: false, seq: 0, statusTimer: null, note: "", online: null };
+let sgSongs = { singer: null, songs: [], sort: "popular" };
+const sgDisplay = (x) => x.zh && x.en && x.zh !== x.en ? [x.zh, x.en] : [x.zh || x.name, x.zh ? "" : (x.en && x.en !== x.name ? x.en : "")];
+
+function showSingers() {
+  if (!sg.loaded) loadSingers(true);
+  watchSingerStatus();
+}
+
+async function loadSingers(reset) {
+  const seq = ++sg.seq;
+  if (reset) { sg.items = []; }
+  if (reset) { sg.online = null; sg.note = ""; sg.useRegion = sg.region; }
+  const p = new URLSearchParams({ q: sg.q, region: sg.useRegion, offset: reset ? 0 : sg.items.length, limit: 60 });
+  let d;
+  try { d = await (await fetch(`/api/singers?${p}`)).json(); } catch { return; }
+  if (seq !== sg.seq) return;
+  // Nothing in the chosen region: search all regions instead, and say so.
+  if (reset && sg.q && sg.useRegion && d.total === 0) {
+    sg.note = `No match in ${REGION_NAMES[sg.useRegion] || sg.useRegion}, showing all regions.`;
+    sg.useRegion = "";
+    p.set("region", "");
+    try { d = await (await fetch(`/api/singers?${p}`)).json(); } catch { return; }
+    if (seq !== sg.seq) return;
+  }
+  sg.loaded = true;
+  sg.items = reset ? d.items : sg.items.concat(d.items);
+  sg.total = d.total; sg.updated = d.updated;
+  renderSingerInfo(d.status);
+  renderSingers();
+}
+
+function sgRow(x, attr) {
+  const [main, sub] = sgDisplay(x);
+  const extra = [sub, REGION_NAMES[x.region] || x.region, x.listeners ? `${fmtCount(x.listeners)} listeners` : "",
+                 x.disambiguation, x.songs != null ? `${x.songs} songs saved` : "", x.in_list ? "in the list" : ""]
+    .filter(Boolean).join(" · ");
+  return `<div class="sgrow" ${attr}><div><b>${esc(main)}</b><small>${esc(extra)}</small></div><span class="chev">›</span></div>`;
+}
+
+// Below local results while searching: look the name up on MusicBrainz
+// (any country), for singers missing from the stored list.
+function onlineBlock() {
+  if (!sg.q) return "";
+  if (!sg.online) return `<button class="more" id="sgOnlineBtn" type="button">Not here? Search MusicBrainz for “${esc(sg.q)}”</button>`;
+  if (sg.online === "loading") return `<div class="empty">Searching MusicBrainz…</div>`;
+  if (sg.online.error) return `<div class="empty" style="color:var(--err)">${esc(sg.online.error)}</div>`;
+  if (!sg.online.length) return `<div class="empty">MusicBrainz has no singer called “${esc(sg.q)}”.</div>`;
+  return `<div class="lyrsrc" style="padding:10px 8px 2px;text-align:left">From MusicBrainz (tap to add to the list):</div>`
+    + sg.online.map((x, i) => sgRow(x, `data-oi="${i}"`)).join("");
+}
+
+function renderSingers() {
+  const note = sg.note ? `<div class="lyrsrc" style="padding:8px;text-align:left">${esc(sg.note)}</div>` : "";
+  if (!sg.items.length) {
+    $("sgList").innerHTML = sg.q || sg.region
+      ? note + `<div class="empty">No singers found in the list.</div>` + onlineBlock()
+      : `<div class="empty">No singers yet.<br>Tap <b>Update list</b> to download the Chinese singer list from MusicBrainz (about 10-20 minutes in the background, needs internet).</div>`;
+    return;
+  }
+  $("sgList").innerHTML = note + sg.items.map((x, i) => sgRow(x, `data-si="${i}"`)).join("") + (sg.items.length < sg.total ? `<button class="more" id="sgMore" type="button">Show more (${sg.total - sg.items.length})</button>` : "")
+    + onlineBlock();
+}
+
+async function searchOnline() {
+  const q = sg.q, seq = sg.seq;
+  sg.online = "loading"; renderSingers();
+  try {
+    const r = await fetch(`/api/singers/online?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    if (seq !== sg.seq) return;
+    sg.online = r.ok ? d : { error: d.detail || "Search failed" };
+  } catch { if (seq === sg.seq) sg.online = { error: "Could not reach the server" }; }
+  renderSingers();
+}
+
+async function addOnlineSinger(x) {
+  try {
+    if (!x.in_list) {
+      const r = await fetch("/api/singers/add", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ mbid: x.mbid }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "Could not add the singer");
+      x.in_list = true;
+      toast(`Added ${d.zh || d.name} to the singer list`);
+    }
+    openSinger({ ...x, songs: null });
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderSingerInfo(st) {
+  const when = sg.updated ? new Date(sg.updated * 1000).toLocaleDateString() : null;
+  let t = `${sg.total.toLocaleString()} singers` + (when ? ` · updated ${when}` : "");
+  if (st && st.running) t = `Updating… ${st.message || ""}` + (st.total ? ` (${Math.round(100 * st.done / st.total)}%)` : "");
+  else if (st && st.error) t = st.error;
+  $("sgInfo").textContent = t;
+  $("sgUpdate").disabled = !!(st && st.running);
+}
+
+// While an update runs, show its progress and reload the list when it ends.
+async function watchSingerStatus() {
+  clearTimeout(sg.statusTimer);
+  let st;
+  try { st = await (await fetch("/api/singers/status")).json(); } catch { return; }
+  renderSingerInfo(st);
+  if (st.running) {
+    sg.wasRunning = true;
+    if (currentTab === "singers") sg.statusTimer = setTimeout(watchSingerStatus, 2000);
+  } else if (sg.wasRunning) {
+    sg.wasRunning = false; loadSingers(true);
+  }
+}
+
+$("sgUpdate").onclick = async () => {
+  $("sgUpdate").disabled = true;
+  try { await fetch("/api/singers/update", { method: "POST" }); } catch {}
+  sg.wasRunning = true;
+  watchSingerStatus();
+};
+let sgTimer = null;
+$("sgSearch").addEventListener("input", () => {
+  clearTimeout(sgTimer);
+  sgTimer = setTimeout(() => { sg.q = $("sgSearch").value.trim(); loadSingers(true); }, 250);
+});
+$("sgRegions").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-r]"); if (!b) return;
+  sg.region = b.dataset.r;
+  document.querySelectorAll("#sgRegions button").forEach((x) => x.classList.toggle("on", x === b));
+  loadSingers(true);
+});
+$("sgList").addEventListener("click", (e) => {
+  if (e.target.id === "sgMore") { loadSingers(false); return; }
+  if (e.target.id === "sgOnlineBtn") { searchOnline(); return; }
+  const row = e.target.closest(".sgrow"); if (!row) return;
+  if (row.dataset.oi != null) { addOnlineSinger(sg.online[+row.dataset.oi]); return; }
+  openSinger(sg.items[+row.dataset.si]);
+});
+
+async function openSinger(x, refresh = false) {
+  if (!x) return;
+  sgSongs = { singer: x, songs: [], sort: sgSongs.sort || "popular" };
+  $("singerListView").classList.add("hidden");
+  $("singerSongsView").classList.remove("hidden");
+  const [main, sub] = sgDisplay(x);
+  $("sgName").textContent = main;
+  $("sgSub").textContent = [sub, REGION_NAMES[x.region]].filter(Boolean).join(" · ");
+  $("songFilter").value = "";
+  $("songList").innerHTML = `<div class="empty">${refresh || x.songs == null ? "Getting songs from MusicBrainz… (big singers can take up to half a minute)" : "Loading…"}</div>`;
+  window.scrollTo(0, 0);
+  try {
+    const r = await fetch(`/api/singers/${x.mbid}/songs${refresh ? "?refresh=1" : ""}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not get the songs");
+    if (sgSongs.singer !== x) return;
+    sgSongs.songs = d.songs;
+    x.songs = d.songs.length;
+    renderSongs();
+  } catch (err) {
+    $("songList").innerHTML = `<div class="empty" style="color:var(--err)">${esc(err.message)}</div>`;
+  }
+}
+
+function renderSongs() {
+  const f = $("songFilter").value.trim().toLowerCase();
+  let list = sgSongs.songs.filter((s) => !f || s.title.toLowerCase().includes(f));
+  if (sgSongs.sort === "az") list = [...list].sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
+  if (sgSongs.sort === "year") list = [...list].sort((a, b) => (b.year || "").localeCompare(a.year || ""));
+  if (!sgSongs.songs.length) { $("songList").innerHTML = `<div class="empty">MusicBrainz has no songs for this singer yet.</div>`; return; }
+  $("songList").innerHTML = list.map((s) => `<div class="sgrow" data-title="${esc(s.title)}">
+      <div><b>${esc(s.title)}</b><small>${[s.listens ? `${fmtCount(s.listens)} plays` : "", s.year, fmtDur(s.length),
+        s.versions > 1 ? `${s.versions} versions` : ""].filter(Boolean).join(" · ")}</small></div>
+      <span class="chev">⌕</span></div>`).join("") || `<div class="empty">No songs match.</div>`;
+}
+$("songFilter").addEventListener("input", renderSongs);
+$("songSort").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-s]"); if (!b) return;
+  sgSongs.sort = b.dataset.s;
+  document.querySelectorAll("#songSort button").forEach((x) => x.classList.toggle("on", x === b));
+  renderSongs();
+});
+$("sgBack").onclick = () => {
+  $("singerSongsView").classList.add("hidden");
+  $("singerListView").classList.remove("hidden");
+  renderSingers();
+};
+$("sgRefresh").onclick = () => openSinger(sgSongs.singer, true);
+// Tap a song: search YouTube for "song singer" on the Playlist tab. The same
+// words fill the lyrics name in the Add popup (song name, then singer).
+$("songList").addEventListener("click", (e) => {
+  const row = e.target.closest(".sgrow[data-title]"); if (!row || !sgSongs.singer) return;
+  const x = sgSongs.singer;
+  const q = `${row.dataset.title} ${x.zh || x.name}`.trim();
+  showPlaylistTab();
+  $("url").value = q; updateSubmitLabel();
+  searchSongs(q);
+});
 
 // ---------------- lyrics editor ----------------
 // Lyrics found online (LRCLIB) or pasted are matched to what the AI heard, so

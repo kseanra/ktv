@@ -13,6 +13,7 @@ app/
   pipeline.py  the stages: yt-dlp download, vocal separation, faster-whisper lyrics
   separators.py vocal separators: MDX-Net on OpenVINO (default) and Demucs
   lyrics_sync.py real lyrics from LRCLIB / pasted, timed with Whisper's words
+  catalog.py    Chinese singer / song list from MusicBrainz (data/catalog.sqlite3)
 tools/
   bench_separation.py  compare separation speed/quality on a downloaded song
   server.py    FastAPI: shared playlist + processing API + media files
@@ -112,6 +113,20 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
 `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*`, or set `KARAOKE_DEVICE=cpu`.
 
 ## Using it
+
+- **Singers** (phone tab, or the TV panel's *Singers* tab): Chinese singers
+  from MusicBrainz (Hong Kong, Taiwan, mainland China, Macau, and Chinese-named
+  singers from Singapore and Malaysia), searchable in Chinese (Traditional or
+  Simplified) or English; best matches first. A singer missing from the list
+  can be found with *Not here? Search MusicBrainz* and added. The first time, tap
+  **Update list** to download it (about 10-20 minutes, in the background). Tap a
+  singer for their songs (fetched from MusicBrainz the first time, then kept
+  offline), sorted Popular (plays on ListenBrainz) / A–Z / Newest; singers are listed
+  by listener count from ListenBrainz (MusicBrainz's sister project), top
+  singers first; tap a song to search YouTube for
+  "song singer". *Update list* refreshes the singers and the songs already
+  opened. Stored in `data/catalog.sqlite3`. Why it works this way:
+  [decision.md](decision.md).
 
 - **Adding a song**: *Add to playlist* (or *+ Add* in History) opens a popup
   with two options, then *Add* adds it:
@@ -299,6 +314,10 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 | GET | `/api/lyrics/{id}/search?q=` | LRCLIB results for the song (best first) |
 | POST | `/api/lyrics/{id}/redo` | `{language?}` run the AI lyrics again (`yue` = Cantonese model, empty = auto) |
 | POST | `/api/lyrics/{id}` | `{text?}` paste, `{lrclib_id?}` use an LRCLIB entry, or `{use_ai: true}` |
+| GET | `/api/singers?q=&region=&offset=` | singer list (stored locally) |
+| POST | `/api/singers/update` | download the singer list again, refresh opened singers' songs (background); progress: `GET /api/singers/status` |
+| GET | `/api/singers/online?q=` · POST `/api/singers/add` `{mbid}` | look a singer up on MusicBrainz / add it to the list |
+| GET | `/api/singers/{mbid}/songs?refresh=` | a singer's songs (fetched from MusicBrainz the first time) |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |
 | GET | `/api/jobs`, `/api/jobs/{id}` | job status |

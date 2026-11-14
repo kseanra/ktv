@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config
-from . import lyrics_sync
+from . import catalog, lyrics_sync
 from .jobs import JobManager, _read_json
 from .pipeline import check_ffmpeg_for_ytdlp, check_js_runtime, extract_video_id, make_pipeline, search_youtube
 
@@ -510,6 +510,67 @@ async def set_lyrics(video_id: str, body: LyricsUpdate):
     if lyr.get("lines") and was_duet and (d / "vocals16k.flac").exists():
         manager.submit(video_id, f"https://www.youtube.com/watch?v={video_id}", None, priority=0, duet=True)
     return {"ok": True, "source": lyr.get("source", "ai"), "lines": len(lyr.get("lines", [])), **(stats or {})}
+
+
+# ---- singers and songs (MusicBrainz, stored locally; see decision.md) ----
+@app.get("/api/singers")
+def singers(q: str = "", region: str = "", offset: int = 0, limit: int = 60):
+    return {**catalog.list_singers(q, region, offset, limit), "status": catalog.status,
+            "regions": catalog.REGIONS}
+
+
+@app.get("/api/singers/status")
+def singers_status():
+    return catalog.status
+
+
+@app.post("/api/singers/update")
+def singers_update():
+    """Download the singer list again (several minutes, in the background),
+    then refresh the songs of singers already opened."""
+    return {"started": catalog.start_update(), "status": catalog.status}
+
+
+@app.get("/api/singers/online")
+async def singers_online(q: str):
+    """Search MusicBrainz by name, for singers missing from the stored list."""
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, catalog.search_online, q)
+    except Exception as e:  # noqa: BLE001
+        log.warning("online singer search failed: %s", e)
+        raise HTTPException(502, "Could not reach MusicBrainz. Check the internet connection.")
+
+
+class SingerAdd(BaseModel):
+    mbid: str
+
+
+@app.post("/api/singers/add")
+async def singers_add(body: SingerAdd):
+    """Add a singer found online to the stored list (kept through updates)."""
+    if not re.fullmatch(r"[0-9a-z-]{36}", body.mbid):
+        raise HTTPException(404)
+    try:
+        s = await asyncio.get_running_loop().run_in_executor(None, catalog.add_singer, body.mbid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        log.warning("adding singer %s failed: %s", body.mbid, e)
+        raise HTTPException(502, "Could not reach MusicBrainz. Check the internet connection.")
+    return {k: s[k] for k in ("mbid", "name", "zh", "en", "region", "type", "disambiguation")}
+
+
+@app.get("/api/singers/{mbid}/songs")
+async def singer_songs(mbid: str, refresh: bool = False):
+    if not re.fullmatch(r"[0-9a-z-]{36}", mbid):
+        raise HTTPException(404)
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, catalog.songs, mbid, refresh)
+    except KeyError:
+        raise HTTPException(404, "singer not found")
+    except Exception as e:  # noqa: BLE001
+        log.warning("songs for %s failed: %s", mbid, e)
+        raise HTTPException(502, "Could not get the songs from MusicBrainz. Check the internet connection.")
 
 
 @app.get("/api/history")
