@@ -159,7 +159,9 @@ def _db() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS fetched (singer TEXT PRIMARY KEY, at REAL, recordings INTEGER);
         CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
         CREATE TABLE IF NOT EXISTS popularity (mbid TEXT PRIMARY KEY, listeners INTEGER, listens INTEGER);
-        CREATE TABLE IF NOT EXISTS added (mbid TEXT PRIMARY KEY, row TEXT);  -- singers added from an online search
+        CREATE TABLE IF NOT EXISTS added (mbid TEXT PRIMARY KEY, row TEXT);  -- singers added by hand (kept through updates)
+        CREATE TABLE IF NOT EXISTS lists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, created REAL);
+        CREATE TABLE IF NOT EXISTS list_members (list_id INTEGER, singer TEXT, added REAL, PRIMARY KEY (list_id, singer));
     """)
     try:                                   # added later: plays per song
         con.execute("ALTER TABLE songs ADD COLUMN listens INTEGER")
@@ -176,10 +178,13 @@ def _meta(con, k, v=None):
 
 
 # ----------------------------------------------------------------- public: read
-def list_singers(q: str = "", region: str = "", offset: int = 0, limit: int = 60) -> dict:
+def list_singers(q: str = "", region: str = "", offset: int = 0, limit: int = 60, list_id: int | None = None) -> dict:
     with _db_lock:
         con = _db()
         where, args = [], []
+        if list_id is not None:                 # a singer list made by the user
+            where.append("s.mbid IN (SELECT singer FROM list_members WHERE list_id = ?)")
+            args.append(list_id)
         if region in REGIONS:
             where.append("s.region = ?")
             args.append(region)
@@ -225,6 +230,9 @@ def songs(mbid: str, refresh: bool = False) -> dict:
     singer = get_singer(mbid)
     if not singer:
         raise KeyError(mbid)
+    if is_local(mbid):                      # added by hand, not on MusicBrainz: no song list
+        return {"singer": {k: singer[k] for k in ("mbid", "name", "zh", "en", "region", "type", "disambiguation")},
+                "fetched": None, "local": True, "songs": []}
     with _db_lock:
         con = _db()
         f = con.execute("SELECT at FROM fetched WHERE singer=?", (mbid,)).fetchone()
@@ -318,6 +326,8 @@ def search_online(q: str) -> list[dict]:
     if config.MOCK:
         arts = [{"id": "00000000-0000-0000-0001-000000000001", "name": "林俊傑", "sort-name": "Lin, JJ",
                  "type": "Person", "country": "SG", "aliases": [{"name": "JJ Lin", "locale": "en"}]}]
+        if not any(w in search_key(q) for w in ("林", "jj", "lin")):
+            arts = []
     else:
         # quoted phrase first (exact name), then the words as typed
         e = re.sub(r'([+\-!(){}\[\]^"~*?:\\/&|])', r"\\\1", q)    # escape search syntax
@@ -362,6 +372,107 @@ def add_singer(mbid: str) -> dict:
     except Exception:  # noqa: BLE001
         pass
     return get_singer(mbid)
+
+
+# ----------------------------------------------------------------- singer lists made by the user
+def is_local(mbid: str) -> bool:
+    """Singers added by hand that MusicBrainz doesn't have get an ID "local-…"."""
+    return mbid.startswith("local-")
+
+
+def get_lists() -> list[dict]:
+    with _db_lock:
+        con = _db()
+        rows = con.execute("""SELECT l.id, l.name, COUNT(m.singer) AS n FROM lists l
+                              LEFT JOIN list_members m ON m.list_id = l.id
+                              GROUP BY l.id ORDER BY l.created""").fetchall()
+        con.close()
+    return [{"id": r["id"], "name": r["name"], "count": r["n"]} for r in rows]
+
+
+def create_list(name: str) -> dict:
+    name = " ".join((name or "").split())[:40]
+    if not name:
+        raise ValueError("Give the list a name.")
+    with _db_lock:
+        con = _db()
+        try:
+            cur = con.execute("INSERT INTO lists (name, created) VALUES (?, ?)", (name, time.time()))
+        except sqlite3.IntegrityError:
+            con.close()
+            raise ValueError(f"There is already a list called “{name}”.")
+        con.commit()
+        lid = cur.lastrowid
+        con.close()
+    return {"id": lid, "name": name, "count": 0}
+
+
+def delete_list(list_id: int):
+    with _db_lock:
+        con = _db()
+        con.execute("DELETE FROM list_members WHERE list_id=?", (list_id,))
+        con.execute("DELETE FROM lists WHERE id=?", (list_id,))
+        con.commit()
+        con.close()
+
+
+def _keep(con, mbid: str):
+    """Remember a singer's row so it survives "Update list" (which rebuilds the table)."""
+    r = con.execute("SELECT * FROM singers WHERE mbid=?", (mbid,)).fetchone()
+    if r:
+        con.execute("INSERT OR REPLACE INTO added VALUES (?, ?)",
+                    (mbid, json.dumps([r[k] for k in r.keys()], ensure_ascii=False)))
+
+
+def add_to_list(list_id: int, mbid: str) -> dict:
+    """Add a singer to a list: one already stored, or one just found on MusicBrainz."""
+    if not get_singer(mbid):
+        add_singer(mbid)                    # from MusicBrainz into the local store
+    with _db_lock:
+        con = _db()
+        if not con.execute("SELECT 1 FROM lists WHERE id=?", (list_id,)).fetchone():
+            con.close()
+            raise KeyError(list_id)
+        con.execute("INSERT OR IGNORE INTO list_members VALUES (?, ?, ?)", (list_id, mbid, time.time()))
+        _keep(con, mbid)
+        con.commit()
+        con.close()
+    return get_singer(mbid)
+
+
+def add_local_to_list(list_id: int, name: str) -> dict:
+    """Add a singer MusicBrainz doesn't know (the user confirmed): stored with
+    just the name; no song list, but YouTube can still be searched by name."""
+    import uuid
+    name = " ".join((name or "").split())[:60]
+    if not name:
+        raise ValueError("Type the singer's name.")
+    with _db_lock:
+        con = _db()
+        if not con.execute("SELECT 1 FROM lists WHERE id=?", (list_id,)).fetchone():
+            con.close()
+            raise KeyError(list_id)
+        # the same hand-added name again: reuse it
+        r = con.execute("SELECT mbid FROM singers WHERE mbid LIKE 'local-%' AND keys = ?", (search_key(name),)).fetchone()
+        mbid = r["mbid"] if r else "local-" + uuid.uuid4().hex[:30]
+        if not r:
+            zh = name if _CJK.search(name) else ""
+            en = name if not zh else ""
+            con.execute("INSERT INTO singers VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (mbid, name, name, zh, en, "", "", "added by hand", 0, search_key(name)))
+        con.execute("INSERT OR IGNORE INTO list_members VALUES (?, ?, ?)", (list_id, mbid, time.time()))
+        _keep(con, mbid)
+        con.commit()
+        con.close()
+    return get_singer(mbid)
+
+
+def remove_from_list(list_id: int, mbid: str):
+    with _db_lock:
+        con = _db()
+        con.execute("DELETE FROM list_members WHERE list_id=? AND singer=?", (list_id, mbid))
+        con.commit()
+        con.close()
 
 
 # ----------------------------------------------------------------- ListenBrainz popularity

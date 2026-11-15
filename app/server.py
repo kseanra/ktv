@@ -514,9 +514,69 @@ async def set_lyrics(video_id: str, body: LyricsUpdate):
 
 # ---- singers and songs (MusicBrainz, stored locally; see decision.md) ----
 @app.get("/api/singers")
-def singers(q: str = "", region: str = "", offset: int = 0, limit: int = 60):
-    return {**catalog.list_singers(q, region, offset, limit), "status": catalog.status,
+def singers(q: str = "", region: str = "", offset: int = 0, limit: int = 60, list: int | None = None):
+    """The stored singers, or the singers of one of the user's lists (list=id)."""
+    return {**catalog.list_singers(q, region, offset, limit, list_id=list), "status": catalog.status,
             "regions": catalog.REGIONS}
+
+
+# ---- singer lists made by the user ----
+class ListCreate(BaseModel):
+    name: str
+
+
+class ListAdd(BaseModel):
+    mbid: str | None = None    # a singer from MusicBrainz (or already stored)
+    name: str | None = None    # or: a name MusicBrainz doesn't know (the user confirmed)
+
+
+@app.get("/api/lists")
+def get_lists():
+    return catalog.get_lists()
+
+
+@app.post("/api/lists")
+def create_list(body: ListCreate):
+    try:
+        return catalog.create_list(body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/lists/{list_id}")
+def delete_list(list_id: int):
+    catalog.delete_list(list_id)
+    return {"ok": True}
+
+
+@app.post("/api/lists/{list_id}/singers")
+async def add_to_list(list_id: int, body: ListAdd):
+    """Add a singer to a list. With mbid: a singer from MusicBrainz (stored
+    locally first if needed). With name only: added by hand, without MusicBrainz."""
+    loop = asyncio.get_running_loop()
+    try:
+        if body.mbid:
+            if not re.fullmatch(r"[0-9a-z-]{36}", body.mbid):
+                raise HTTPException(404)
+            s = await loop.run_in_executor(None, catalog.add_to_list, list_id, body.mbid)
+        else:
+            s = await loop.run_in_executor(None, catalog.add_local_to_list, list_id, body.name or "")
+    except KeyError:
+        raise HTTPException(404, "list not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.warning("adding to list failed: %s", e)
+        raise HTTPException(502, "Could not reach MusicBrainz. Check the internet connection.")
+    return {k: s[k] for k in ("mbid", "name", "zh", "en", "region", "type", "disambiguation")}
+
+
+@app.delete("/api/lists/{list_id}/singers/{mbid}")
+def remove_from_list(list_id: int, mbid: str):
+    catalog.remove_from_list(list_id, mbid)
+    return {"ok": True}
 
 
 @app.get("/api/singers/status")
@@ -560,12 +620,42 @@ async def singers_add(body: SingerAdd):
     return {k: s[k] for k in ("mbid", "name", "zh", "en", "region", "type", "disambiguation")}
 
 
+def _library_matches(songs: list[dict], singer: dict) -> None:
+    """Mark each song with the matching songs already in the local library
+    (song["local"]): the song title appears in the video title (or in the
+    lyrics name it was added with). Videos that also name the singer come
+    first; very short titles (1-2 characters, e.g. 愛) need the singer too."""
+    lib = []
+    for h in manager.history():
+        lib.append((h, catalog.search_key(f'{h["title"]} {h.get("lyrics_query") or ""}')))
+    names = [catalog.search_key(n) for n in (singer.get("zh"), singer.get("en"), singer.get("name")) if n]
+    names = [n for n in names if len(n) >= 2]
+    for song in songs:
+        tk = catalog.title_key(song["title"])
+        found = []
+        if len(tk) >= 1:
+            for h, key in lib:
+                if tk not in key:
+                    continue
+                with_singer = any(n in key for n in names)
+                if len(tk) <= 2 and not with_singer:
+                    continue
+                ready = h["has_audio"] and h["status"] == "done"
+                found.append((0 if with_singer else 1, 0 if ready else 1,
+                              {"video_id": h["video_id"], "title": h["title"], "duration": h["duration"],
+                               "ready": ready, "has_lyrics": h["has_lyrics"], "with_singer": with_singer}))
+        found.sort(key=lambda x: (x[0], x[1]))
+        song["local"] = [f[2] for f in found[:3]]
+
+
 @app.get("/api/singers/{mbid}/songs")
 async def singer_songs(mbid: str, refresh: bool = False):
     if not re.fullmatch(r"[0-9a-z-]{36}", mbid):
         raise HTTPException(404)
     try:
-        return await asyncio.get_running_loop().run_in_executor(None, catalog.songs, mbid, refresh)
+        res = await asyncio.get_running_loop().run_in_executor(None, catalog.songs, mbid, refresh)
+        _library_matches(res["songs"], res["singer"])
+        return res
     except KeyError:
         raise HTTPException(404, "singer not found")
     except Exception as e:  # noqa: BLE001

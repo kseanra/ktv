@@ -185,6 +185,15 @@
   .search { padding: 10px 8px 2px; }
   /* singers (MusicBrainz catalogue) */
   .sgview { display: contents; }
+  .sglists { display: flex; gap: 8px; padding: 10px 8px 0; }
+  .sglists select { flex: 1; min-width: 0; }
+  .sglists button { padding: 0 14px; white-space: nowrap; font-size: 14px; }
+  .sgrow .rm { padding: 4px 10px; font-size: 13px; }
+  #addSingerModal .addbtns { grid-template-columns: 1fr; }
+  .modal-card .sgform button { padding: 0 16px; }
+  .sgform { display: flex; gap: 8px; }
+  .sgform input { flex: 1; min-width: 0; }
+  .sgform button { padding: 0 16px; white-space: nowrap; }
   .chips { display: flex; gap: 6px; padding: 8px 8px 0; flex-wrap: wrap; }
   .chips button { padding: 5px 12px; font-size: 13px; border-radius: 99px; }
   .chips button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -358,11 +367,20 @@
     </div>
     <div id="tabSingers" class="hidden" style="display:contents">
       <div class="sgview" id="singerListView">
-        <div class="search"><input id="sgSearch" type="search" placeholder="Search singers (中文 / English)" autocomplete="off"></div>
+        <div class="sglists">
+          <select id="sgListSel" title="Which singer list to show"><option value="">All Chinese singers</option></select>
+          <button id="sgNewList" type="button">+ New list</button>
+        </div>
+        <form class="search sgform" id="sgForm" autocomplete="off">
+          <input id="sgSearch" type="search" enterkeyhint="search" placeholder="Search singers (中文 / English)" autocomplete="off">
+          <button type="submit" id="sgSearchBtn">Search</button>
+        </form>
         <div class="chips" id="sgRegions">
           <button data-r="" class="on">All</button><button data-r="HK">香港 HK</button><button data-r="TW">台灣 TW</button><button data-r="CN">中國 CN</button><button data-r="MO">澳門 MO</button><button data-r="SG">新加坡 SG</button><button data-r="MY">馬來西亞 MY</button>
         </div>
-        <div class="sgbar"><span id="sgInfo"></span><button id="sgUpdate" type="button" title="Download the Chinese singer list from MusicBrainz again">Update list</button></div>
+        <div class="sgbar" id="sgUpdateBar"><span id="sgInfo"></span><button id="sgUpdate" type="button" title="Download the Chinese singer list from MusicBrainz again">Update list</button></div>
+        <div class="sgbar hidden" id="sgListBar"><span id="sgListInfo"></span>
+          <button id="sgAddSinger" type="button">+ Add singer</button><button id="sgDelList" type="button">Delete list</button></div>
         <div class="list" id="sgList"></div>
       </div>
       <div class="sgview hidden" id="singerSongsView">
@@ -409,6 +427,28 @@
       </select>
       <small>The video title is still tried online first. Cantonese uses a model trained on Cantonese. Remembered for next time.</small></label>
     <div class="addbtns"><button id="addCancel" type="button">Cancel</button><button class="primary" id="addConfirm" type="button">Add</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="newListModal" role="dialog" aria-label="New singer list">
+  <div class="modal-card addcard">
+    <h2>New singer list</h2>
+    <input id="newListName" placeholder="List name, e.g. 我的最愛 or Party" maxlength="40" autocomplete="off" enterkeyhint="done">
+    <div class="msg" id="newListMsg"></div>
+    <div class="addbtns"><button id="newListCancel" type="button">Cancel</button><button class="primary" id="newListCreate" type="button">Create</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="addSingerModal" role="dialog" aria-label="Add a singer">
+  <div class="modal-card addcard lyrcard">
+    <h2>Add a singer</h2>
+    <div class="addwhat" id="addSingerTo"></div>
+    <form class="sgform" id="addSingerForm" autocomplete="off">
+      <input id="addSingerName" type="search" enterkeyhint="search" placeholder="Singer name (中文 / English)" autocomplete="off" maxlength="60">
+      <button type="submit" id="addSingerCheck">Check</button>
+    </form>
+    <div class="lyrsrc" id="addSingerHint">The name is checked on MusicBrainz first.</div>
+    <div class="lyrres" id="addSingerRes"></div>
+    <div class="msg" id="addSingerMsg"></div>
+    <div class="addbtns"><button id="addSingerClose" type="button">Done</button></div>
   </div>
 </div>
 <div class="modal hidden" id="lyrModal" role="dialog" aria-label="Lyrics">
@@ -599,12 +639,15 @@ let results = [], resultsQuery = "", searchSeq = 0;
 const fmtViews = (n) => !n ? "" : n >= 1e9 ? (n / 1e9).toFixed(1) + "B views" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M views"
   : n >= 1e3 ? Math.round(n / 1e3) + "K views" : n + " views";
 
-async function searchSongs(q) {
+// local: songs already in the library that match (from the Singers tab);
+// shown above the YouTube results, ready to add straight away.
+let resultsLocal = [];
+async function searchSongs(q, local = []) {
   const seq = ++searchSeq;
-  resultsQuery = q; results = [];
+  resultsQuery = q; results = []; resultsLocal = local || [];
   $("searchResults").classList.remove("hidden");
   $("resultsFor").textContent = `Searching YouTube for “${q}”…`;
-  $("resultsList").innerHTML = `<div class="empty">Searching…</div>`;
+  $("resultsList").innerHTML = localResultsHTML() + `<div class="empty">Searching YouTube…</div>`;
   $("addSubmit").disabled = true;
   if (isRemote) $("url").blur();           // hide the phone keyboard so results show
   try {
@@ -618,15 +661,29 @@ async function searchSongs(q) {
   } catch (err) {
     if (seq !== searchSeq) return;
     $("resultsFor").textContent = `Results for “${q}”`;
-    $("resultsList").innerHTML = `<div class="empty" style="color:var(--err)">${esc(err.message)}</div>`;
+    $("resultsList").innerHTML = localResultsHTML() + `<div class="empty" style="color:var(--err)">${esc(err.message)}</div>`;
   } finally {
     if (seq === searchSeq) $("addSubmit").disabled = false;
   }
 }
 
+function localResultsHTML() {
+  if (!resultsLocal.length) return "";
+  return `<div class="results-head"><span>In your library</span></div>` + resultsLocal.map((r, i) => `<div class="hist">
+      <img loading="lazy" src="https://i.ytimg.com/vi/${esc(r.video_id)}/mqdefault.jpg" alt="" onerror="this.style.visibility='hidden'">
+      <div><div class="t" title="${esc(r.title)}">${esc(r.title || r.video_id)}</div>
+        <div class="m">${fmtDur(r.duration) ? `<span>${fmtDur(r.duration)}</span>` : ""}
+          ${r.ready ? `<span class="tag ok" title="Processed before: ready to sing straight away">ready</span>` : `<span class="tag">processing not finished</span>`}
+          ${r.has_lyrics ? `<span class="tag ok">lyrics</span>` : ""}</div></div>
+      <div class="hbtns"><button data-li="${i}">+ Add</button></div>
+    </div>`).join("") + `<div class="results-head"><span>From YouTube</span></div>`;
+}
+
 function renderResults() {
-  if (!results.length) { $("resultsList").innerHTML = `<div class="empty">No videos found. Try other words, e.g. add the singer's name.</div>`; return; }
-  $("resultsList").innerHTML = results.map((r, i) => `<div class="hist">
+  const localIds = new Set(resultsLocal.map((r) => r.video_id));
+  const yt = results.map((r, i) => [r, i]).filter(([r]) => !localIds.has(r.video_id));
+  if (!yt.length) { $("resultsList").innerHTML = localResultsHTML() + `<div class="empty">No${resultsLocal.length ? " other" : ""} videos found on YouTube. Try other words, e.g. add the singer's name.</div>`; return; }
+  $("resultsList").innerHTML = localResultsHTML() + yt.map(([r, i]) => `<div class="hist">
       <img loading="lazy" src="${esc(r.thumbnail || `https://i.ytimg.com/vi/${r.video_id}/mqdefault.jpg`)}" alt="" onerror="this.style.visibility='hidden'">
       <div><div class="t" title="${esc(r.title)}">${esc(r.title || r.video_id)}</div>
         <div class="m">${r.channel ? `<span class="ch">${esc(r.channel)}</span>` : ""}
@@ -639,6 +696,14 @@ function renderResults() {
 }
 
 $("resultsList").addEventListener("click", (e) => {
+  const lb = e.target.closest("button[data-li]");
+  if (lb) {
+    const r = resultsLocal[+lb.dataset.li]; if (!r) return;
+    openAddModal(r.video_id, r.title || r.video_id, (ok) => {
+      if (ok) { $("url").value = ""; updateSubmitLabel(); clearResults(); }
+    }, resultsQuery, true);
+    return;
+  }
   const b = e.target.closest("button[data-ri]"); if (!b) return;
   const r = results[+b.dataset.ri]; if (!r) return;
   // The words the user searched with are usually the song name: use them to
@@ -649,7 +714,7 @@ $("resultsList").addEventListener("click", (e) => {
 });
 function clearResults() {
   ++searchSeq;                              // a search still running is ignored
-  results = []; $("resultsList").innerHTML = "";
+  results = []; resultsLocal = []; $("resultsList").innerHTML = "";
   $("searchResults").classList.add("hidden");
   $("addSubmit").disabled = false;
 }
@@ -664,7 +729,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
   $("tabHistory").classList.toggle("hidden", currentTab !== "history");
   $("tabSingers").classList.toggle("hidden", currentTab !== "singers");
   if (currentTab === "history") loadHistory();
-  if (currentTab === "singers") showSingers();
+  if (currentTab === "singers") setTimeout(showSingers);
 }));
 // Show the TV side panel's Playlist tab (used after picking a song from Singers).
 function showPlaylistTab() {
@@ -682,7 +747,7 @@ function setView(view) {
   $("tabHistory").classList.toggle("hidden", view !== "history");
   $("tabSingers").classList.toggle("hidden", view !== "singers");
   if (view === "history") loadHistory();
-  if (view === "singers") showSingers();
+  if (view === "singers") setTimeout(showSingers);   // after the page script has run (restored view)
   pref.set("view", view);
   window.scrollTo(0, 0);
 }
@@ -1091,21 +1156,159 @@ let sg = { q: "", region: "", items: [], total: 0, loaded: false, seq: 0, status
 let sgSongs = { singer: null, songs: [], sort: "popular" };
 const sgDisplay = (x) => x.zh && x.en && x.zh !== x.en ? [x.zh, x.en] : [x.zh || x.name, x.zh ? "" : (x.en && x.en !== x.name ? x.en : "")];
 
-function showSingers() {
-  if (!sg.loaded) loadSingers(true);
+async function showSingers() {
   watchSingerStatus();
+  if (!sg.loaded && !sg.starting) {
+    sg.starting = true;                       // lists first: the remembered list decides what to load
+    try { await loadLists(); } finally { sg.starting = false; }
+    loadSingers(true);
+  }
 }
+
+// ---- singer lists made by the user ----
+let sgLists = [];
+sg.listId = pref.get("sgList", "");
+async function loadLists() {
+  try { sgLists = await (await fetch("/api/lists")).json(); } catch { return; }
+  if (sg.listId && !sgLists.some((l) => String(l.id) === String(sg.listId))) { sg.listId = ""; pref.set("sgList", ""); }
+  $("sgListSel").innerHTML = `<option value="">All Chinese singers</option>` +
+    sgLists.map((l) => `<option value="${l.id}">${esc(l.name)} (${l.count})</option>`).join("");
+  $("sgListSel").value = sg.listId;
+  syncListMode();
+}
+const currentList = () => sgLists.find((l) => String(l.id) === String(sg.listId));
+// A user list hides the region chips and "Update list" and shows its own buttons.
+function syncListMode() {
+  const l = currentList();
+  $("sgRegions").classList.toggle("hidden", !!l);
+  $("sgUpdateBar").classList.toggle("hidden", !!l);
+  $("sgListBar").classList.toggle("hidden", !l);
+  if (l) $("sgListInfo").textContent = `${l.count} singer${l.count === 1 ? "" : "s"} in “${l.name}”`;
+}
+$("sgListSel").addEventListener("change", () => {
+  sg.listId = $("sgListSel").value; pref.set("sgList", sg.listId);
+  syncListMode(); loadSingers(true);
+});
+async function refreshLists() { await loadLists(); loadSingers(true); }
+
+// New list
+$("sgNewList").onclick = () => {
+  $("newListName").value = ""; $("newListMsg").textContent = "";
+  $("newListModal").classList.remove("hidden"); $("newListName").focus();
+};
+$("newListCancel").onclick = () => $("newListModal").classList.add("hidden");
+async function createList() {
+  const name = $("newListName").value.trim();
+  if (!name) { $("newListMsg").className = "msg err"; $("newListMsg").textContent = "Give the list a name."; return; }
+  try {
+    const r = await fetch("/api/lists", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not create the list");
+    $("newListModal").classList.add("hidden");
+    sg.listId = String(d.id); pref.set("sgList", sg.listId);
+    await refreshLists();
+    toast(`Created “${d.name}”. Add singers with + Add singer.`);
+    openAddSinger();
+  } catch (err) { $("newListMsg").className = "msg err"; $("newListMsg").textContent = err.message; }
+}
+$("newListCreate").onclick = createList;
+$("newListName").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); createList(); } });
+
+// Delete list (tap twice)
+$("sgDelList").onclick = async () => {
+  const l = currentList(); if (!l) return;
+  const b = $("sgDelList");
+  if (!b.classList.contains("armed")) {
+    b.classList.add("armed"); b.textContent = "Tap again to delete";
+    setTimeout(() => { b.classList.remove("armed"); b.textContent = "Delete list"; }, 3000);
+    return;
+  }
+  b.classList.remove("armed"); b.textContent = "Delete list";
+  await fetch(`/api/lists/${l.id}`, { method: "DELETE" });
+  sg.listId = ""; pref.set("sgList", "");
+  toast(`Deleted “${l.name}”`);
+  refreshLists();
+};
+
+// Add a singer: check MusicBrainz first; if it doesn't know the name, the
+// user can still add it (confirmed with "Add anyway").
+let addSingerFound = [], addSingerQuery = "";
+function openAddSinger() {
+  const l = currentList(); if (!l) return;
+  $("addSingerTo").textContent = `to “${l.name}”`;
+  $("addSingerName").value = ""; $("addSingerRes").innerHTML = ""; $("addSingerMsg").textContent = "";
+  $("addSingerHint").textContent = "The name is checked on MusicBrainz first.";
+  addSingerFound = []; addSingerQuery = "";
+  $("addSingerModal").classList.remove("hidden"); $("addSingerName").focus();
+}
+$("sgAddSinger").onclick = openAddSinger;
+$("addSingerClose").onclick = () => { $("addSingerModal").classList.add("hidden"); refreshLists(); };
+$("addSingerForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = $("addSingerName").value.trim();
+  if (!q) return;
+  addSingerQuery = q; addSingerFound = [];
+  if (isRemote) $("addSingerName").blur();
+  $("addSingerMsg").textContent = "";
+  $("addSingerHint").textContent = `Checking MusicBrainz for “${q}”…`;
+  $("addSingerRes").innerHTML = "";
+  $("addSingerCheck").disabled = true;
+  let failed = null;
+  try {
+    const r = await fetch(`/api/singers/online?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "MusicBrainz search failed");
+    addSingerFound = d;
+  } catch (err) { failed = err.message; }
+  finally { $("addSingerCheck").disabled = false; }
+  if (addSingerQuery !== q) return;
+  renderAddSinger(failed);
+});
+function renderAddSinger(failed) {
+  const q = addSingerQuery;
+  const anyway = `<button type="button" id="addAnyway" class="more">Add “${esc(q)}” anyway</button>`;
+  if (failed) {
+    $("addSingerHint").textContent = `${failed} Add “${q}” without MusicBrainz? It won't have a song list, but YouTube can still be searched by name.`;
+    $("addSingerRes").innerHTML = anyway; return;
+  }
+  if (!addSingerFound.length) {
+    $("addSingerHint").textContent = `MusicBrainz has no singer called “${q}”. Add it anyway? It won't have a song list, but YouTube can still be searched by name.`;
+    $("addSingerRes").innerHTML = anyway; return;
+  }
+  $("addSingerHint").textContent = "Found on MusicBrainz. Pick the right singer:";
+  $("addSingerRes").innerHTML = addSingerFound.map((x, i) => {
+    const [main, sub] = sgDisplay(x);
+    return `<div class="lres"><div><b>${esc(main)}</b><span>${esc([sub, REGION_NAMES[x.region] || x.region, x.type, x.disambiguation].filter(Boolean).join(" · "))}</span></div>
+      <button type="button" data-ai="${i}">Add</button></div>`;
+  }).join("") + `<div class="lyrsrc">None of these?</div>` + anyway;
+}
+$("addSingerRes").addEventListener("click", async (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const l = currentList(); if (!l) return;
+  const body = b.id === "addAnyway" ? { name: addSingerQuery } : { mbid: addSingerFound[+b.dataset.ai].mbid };
+  b.disabled = true;
+  try {
+    const r = await fetch(`/api/lists/${l.id}/singers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not add the singer");
+    b.textContent = "Added ✓";
+    $("addSingerMsg").className = "msg"; $("addSingerMsg").textContent = `Added ${d.zh || d.name} to “${l.name}”. Type another name to add more.`;
+    $("addSingerName").value = "";
+    refreshLists();
+  } catch (err) { b.disabled = false; $("addSingerMsg").className = "msg err"; $("addSingerMsg").textContent = err.message; }
+});
 
 async function loadSingers(reset) {
   const seq = ++sg.seq;
   if (reset) { sg.items = []; }
   if (reset) { sg.online = null; sg.note = ""; sg.useRegion = sg.region; }
-  const p = new URLSearchParams({ q: sg.q, region: sg.useRegion, offset: reset ? 0 : sg.items.length, limit: 60 });
+  const p = new URLSearchParams({ q: sg.q, region: currentList() ? "" : sg.useRegion, offset: reset ? 0 : sg.items.length, limit: 60 });
+  if (currentList()) p.set("list", sg.listId);
   let d;
   try { d = await (await fetch(`/api/singers?${p}`)).json(); } catch { return; }
   if (seq !== sg.seq) return;
   // Nothing in the chosen region: search all regions instead, and say so.
-  if (reset && sg.q && sg.useRegion && d.total === 0) {
+  if (reset && sg.q && sg.useRegion && !currentList() && d.total === 0) {
     sg.note = `No match in ${REGION_NAMES[sg.useRegion] || sg.useRegion}, showing all regions.`;
     sg.useRegion = "";
     p.set("region", "");
@@ -1124,7 +1327,9 @@ function sgRow(x, attr) {
   const extra = [sub, REGION_NAMES[x.region] || x.region, x.listeners ? `${fmtCount(x.listeners)} listeners` : "",
                  x.disambiguation, x.songs != null ? `${x.songs} songs saved` : "", x.in_list ? "in the list" : ""]
     .filter(Boolean).join(" · ");
-  return `<div class="sgrow" ${attr}><div><b>${esc(main)}</b><small>${esc(extra)}</small></div><span class="chev">›</span></div>`;
+  const rm = currentList() && x.mbid && !x.in_list && attr.startsWith("data-si")
+    ? `<button class="rm" type="button" data-rm="${x.mbid}" title="Remove from this list">✕</button>` : "";
+  return `<div class="sgrow" ${attr}><div><b>${esc(main)}</b><small>${esc(extra)}</small></div>${rm}<span class="chev">›</span></div>`;
 }
 
 // Below local results while searching: look the name up on MusicBrainz
@@ -1141,6 +1346,10 @@ function onlineBlock() {
 
 function renderSingers() {
   const note = sg.note ? `<div class="lyrsrc" style="padding:8px;text-align:left">${esc(sg.note)}</div>` : "";
+  if (!sg.items.length && currentList() && !sg.q) {
+    $("sgList").innerHTML = `<div class="empty">No singers in this list yet.<br>Tap <b>+ Add singer</b>.</div>`;
+    return;
+  }
   if (!sg.items.length) {
     $("sgList").innerHTML = sg.q || sg.region
       ? note + `<div class="empty">No singers found in the list.</div>` + onlineBlock()
@@ -1179,7 +1388,7 @@ async function addOnlineSinger(x) {
 
 function renderSingerInfo(st) {
   const when = sg.updated ? new Date(sg.updated * 1000).toLocaleDateString() : null;
-  let t = `${sg.total.toLocaleString()} singers` + (when ? ` · updated ${when}` : "");
+  let t = `${sg.total.toLocaleString()} singer${sg.total === 1 ? "" : "s"}` + (when ? ` · updated ${when}` : "");
   if (st && st.running) t = `Updating… ${st.message || ""}` + (st.total ? ` (${Math.round(100 * st.done / st.total)}%)` : "");
   else if (st && st.error) t = st.error;
   $("sgInfo").textContent = t;
@@ -1206,10 +1415,28 @@ $("sgUpdate").onclick = async () => {
   sg.wasRunning = true;
   watchSingerStatus();
 };
-let sgTimer = null;
-$("sgSearch").addEventListener("input", () => {
+// Search as you type (after a short pause), or straight away with the Search
+// button / Enter. While a Chinese input method is still composing (pinyin,
+// jyutping, handwriting), wait for the finished characters.
+let sgTimer = null, sgComposing = false;
+function runSingerSearch() {
   clearTimeout(sgTimer);
-  sgTimer = setTimeout(() => { sg.q = $("sgSearch").value.trim(); loadSingers(true); }, 250);
+  const q = $("sgSearch").value.trim();
+  if (q === sg.q && sg.loaded) return;
+  sg.q = q; loadSingers(true);
+}
+$("sgSearch").addEventListener("compositionstart", () => { sgComposing = true; });
+$("sgSearch").addEventListener("compositionend", () => { sgComposing = false; runSingerSearch(); });
+$("sgSearch").addEventListener("input", () => {
+  if (sgComposing) return;
+  clearTimeout(sgTimer);
+  sgTimer = setTimeout(runSingerSearch, 300);
+});
+$("sgForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  sg.q = null;                       // always search again on Search / Enter
+  runSingerSearch();
+  if (isRemote) $("sgSearch").blur(); // hide the phone keyboard so the results show
 });
 $("sgRegions").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-r]"); if (!b) return;
@@ -1220,6 +1447,12 @@ $("sgRegions").addEventListener("click", (e) => {
 $("sgList").addEventListener("click", (e) => {
   if (e.target.id === "sgMore") { loadSingers(false); return; }
   if (e.target.id === "sgOnlineBtn") { searchOnline(); return; }
+  const rmb = e.target.closest("button[data-rm]");
+  if (rmb) {
+    const l = currentList(); if (!l) return;
+    fetch(`/api/lists/${l.id}/singers/${rmb.dataset.rm}`, { method: "DELETE" }).then(refreshLists);
+    return;
+  }
   const row = e.target.closest(".sgrow"); if (!row) return;
   if (row.dataset.oi != null) { addOnlineSinger(sg.online[+row.dataset.oi]); return; }
   openSinger(sg.items[+row.dataset.si]);
@@ -1242,6 +1475,7 @@ async function openSinger(x, refresh = false) {
     if (!r.ok) throw new Error(d.detail || "Could not get the songs");
     if (sgSongs.singer !== x) return;
     sgSongs.songs = d.songs;
+    sgSongs.local = !!d.local;
     x.songs = d.songs.length;
     renderSongs();
   } catch (err) {
@@ -1254,9 +1488,15 @@ function renderSongs() {
   let list = sgSongs.songs.filter((s) => !f || s.title.toLowerCase().includes(f));
   if (sgSongs.sort === "az") list = [...list].sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
   if (sgSongs.sort === "year") list = [...list].sort((a, b) => (b.year || "").localeCompare(a.year || ""));
-  if (!sgSongs.songs.length) { $("songList").innerHTML = `<div class="empty">MusicBrainz has no songs for this singer yet.</div>`; return; }
+  if (!sgSongs.songs.length) {
+    const nm = sgSongs.singer.zh || sgSongs.singer.name;
+    $("songList").innerHTML = `<div class="empty">${sgSongs.local ? "This singer was added by hand (not on MusicBrainz), so there is no song list."
+      : "MusicBrainz has no songs for this singer yet."}</div>
+      <button class="more" type="button" id="songYt">Search YouTube for “${esc(nm)}”</button>`;
+    return;
+  }
   $("songList").innerHTML = list.map((s) => `<div class="sgrow" data-title="${esc(s.title)}">
-      <div><b>${esc(s.title)}</b><small>${[s.listens ? `${fmtCount(s.listens)} plays` : "", s.year, fmtDur(s.length),
+      <div><b>${esc(s.title)}${s.local && s.local.length ? ` <span class="tag ok" title="Already in your library">in library</span>` : ""}</b><small>${[s.listens ? `${fmtCount(s.listens)} plays` : "", s.year, fmtDur(s.length),
         s.versions > 1 ? `${s.versions} versions` : ""].filter(Boolean).join(" · ")}</small></div>
       <span class="chev">⌕</span></div>`).join("") || `<div class="empty">No songs match.</div>`;
 }
@@ -1276,12 +1516,18 @@ $("sgRefresh").onclick = () => openSinger(sgSongs.singer, true);
 // Tap a song: search YouTube for "song singer" on the Playlist tab. The same
 // words fill the lyrics name in the Add popup (song name, then singer).
 $("songList").addEventListener("click", (e) => {
+  if (e.target.id === "songYt" && sgSongs.singer) {
+    const q = sgSongs.singer.zh || sgSongs.singer.name;
+    showPlaylistTab(); $("url").value = q; updateSubmitLabel(); searchSongs(q);
+    return;
+  }
   const row = e.target.closest(".sgrow[data-title]"); if (!row || !sgSongs.singer) return;
   const x = sgSongs.singer;
   const q = `${row.dataset.title} ${x.zh || x.name}`.trim();
+  const song = sgSongs.songs.find((s) => s.title === row.dataset.title);
   showPlaylistTab();
   $("url").value = q; updateSubmitLabel();
-  searchSongs(q);
+  searchSongs(q, (song && song.local) || []);
 });
 
 // ---------------- lyrics editor ----------------

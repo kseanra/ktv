@@ -120,6 +120,23 @@ Searching the stored list sometimes showed the wrong singer first or nothing:
   MusicBrainz (any country). Tapping a result adds that singer to the list
   (kept through later updates) and opens their songs.
 
+### Update (2026-11-15): singer lists made by the user
+
+Users can make their own singer lists (e.g. "我的最愛", "Party") next to the
+full Chinese list:
+
+- **New list** (popup): a name; lists are stored in `data/catalog.sqlite3`
+  (`lists`, `list_members`).
+- **Add singer** (popup): the typed name is checked on MusicBrainz first.
+  If it is found, the user picks the right artist and it is stored locally
+  (and its popularity fetched). If MusicBrainz has no such singer (or can't be
+  reached), the user is asked to confirm, and the singer is added by hand with
+  just the name: ID `local-…`, no song list, but "Search YouTube for <name>"
+  still works.
+- Singers in a list are kept through "Update list" (stored in `added`).
+- A list can be shown instead of the full list (remembered per phone), searched,
+  and singers removed (✕); a list can be deleted (tap twice).
+
 ### Rules we follow (MusicBrainz terms)
 
 - At most about one request per second (`app/catalog.py` waits 1.1 s between

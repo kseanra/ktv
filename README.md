@@ -118,14 +118,20 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   from MusicBrainz (Hong Kong, Taiwan, mainland China, Macau, and Chinese-named
   singers from Singapore and Malaysia), searchable in Chinese (Traditional or
   Simplified) or English; best matches first. A singer missing from the list
-  can be found with *Not here? Search MusicBrainz* and added. The first time, tap
+  can be found with *Not here? Search MusicBrainz* and added.
+  **Your own lists:** *+ New list* makes a singer list (e.g. 我的最愛); pick it
+  in the list menu, then *+ Add singer*: the name is checked on MusicBrainz
+  first (pick the right one), and a singer MusicBrainz doesn't know can still
+  be added after confirming (no song list; YouTube search by name). ✕ removes a
+  singer from the list; *Delete list* (tap twice) removes the list. The first time, tap
   **Update list** to download it (about 10-20 minutes, in the background). Tap a
   singer for their songs (fetched from MusicBrainz the first time, then kept
   offline), sorted Popular (plays on ListenBrainz) / A–Z / Newest; singers are listed
   by listener count from ListenBrainz (MusicBrainz's sister project), top
   singers first; tap a song to search YouTube for
-  "song singer". *Update list* refreshes the singers and the songs already
-  opened. Stored in `data/catalog.sqlite3`. Why it works this way:
+  "song singer". Songs already in your library are marked *in library*, and
+  appear first in the results ("In your library", ready to add straight away).
+  *Update list* refreshes the singers and the songs already opened. Stored in `data/catalog.sqlite3`. Why it works this way:
   [decision.md](decision.md).
 
 - **Adding a song**: *Add to playlist* (or *+ Add* in History) opens a popup
@@ -316,6 +322,9 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 | POST | `/api/lyrics/{id}` | `{text?}` paste, `{lrclib_id?}` use an LRCLIB entry, or `{use_ai: true}` |
 | GET | `/api/singers?q=&region=&offset=` | singer list (stored locally) |
 | POST | `/api/singers/update` | download the singer list again, refresh opened singers' songs (background); progress: `GET /api/singers/status` |
+| GET | `/api/lists` · POST `/api/lists` `{name}` · DELETE `/api/lists/{id}` | your singer lists |
+| POST | `/api/lists/{id}/singers` `{mbid}` or `{name}` · DELETE `/api/lists/{id}/singers/{mbid}` | add (from MusicBrainz, or by hand) / remove a singer |
+| GET | `/api/singers?list={id}` | the singers of one list |
 | GET | `/api/singers/online?q=` · POST `/api/singers/add` `{mbid}` | look a singer up on MusicBrainz / add it to the list |
 | GET | `/api/singers/{mbid}/songs?refresh=` | a singer's songs (fetched from MusicBrainz the first time) |
 | GET | `/api/history` | every downloaded song, most recently played first |
