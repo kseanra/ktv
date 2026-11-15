@@ -72,7 +72,10 @@ LYRICS_ONLINE = os.environ.get("KARAOKE_LYRICS_ONLINE", "1") == "1"
 PUBLIC_URL = os.environ.get("KARAOKE_PUBLIC_URL", "").rstrip("/")
 
 # Labels shown on the TV for duet voice tags (male, female), e.g. "男,女".
-VOICE_LABELS = (os.environ.get("KARAOKE_VOICE_LABELS", "M,F").split(",") + ["M", "F"])[:2]
+VOICE_LABELS = (os.environ.get("KARAOKE_VOICE_LABELS", "M,F,B").split(",") + ["M", "F", "B"])[:3]
+# How duet lines are tagged: "auto" = voice fingerprints (WeSpeaker model,
+# downloaded once, 26 MB), falling back to pitch; "pitch" = pitch only.
+VOICE_METHOD = os.environ.get("KARAOKE_VOICE_METHOD", "auto")
 
 # KARAOKE_MOCK=1 replaces download + models with fake but realistic stages,
 # so the queue and player can be tried without YouTube access or model weights.

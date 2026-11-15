@@ -446,16 +446,22 @@ def _tag_voices(job, out: Path, tagger):
     info = tagger(lyrics["lines"])
     lyrics["duet"] = True
     lyrics["voices"] = info
+    if info.get("marked") and info["marked"] >= len(lyrics["lines"]):
+        lyrics["voice_source"] = lyrics.get("voice_source") or "lyrics"
+    else:
+        lyrics["voice_source"] = info.get("method", "pitch")
     (out / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False), encoding="utf-8")
     log.info("voice tags for %s: %s", job.video_id, info)
 
 
 def _real_voices(self, job, out: Path):
-    """Stage 4 (duets only): tag each lyric line male / female from pitch."""
+    """Stage 4 (duets only): tag each lyric line male / female, by voice
+    fingerprint (falling back to pitch); lyric marks (男/女/合) are kept."""
     import soundfile as sf
     from .voices import tag_lines
     audio, _ = sf.read(out / "vocals16k.flac", dtype="float32")
-    _tag_voices(job, out, lambda lines: tag_lines(audio, lines))
+    _tag_voices(job, out, lambda lines: tag_lines(audio, lines, models_dir=config.MODELS_DIR,
+                                                  method=config.VOICE_METHOD))
 
 
 RealPipeline.voices = _real_voices
@@ -520,8 +526,9 @@ def _mock_voices(self, job, out: Path):
 
     def tag(lines):
         for i, ln in enumerate(lines):
-            ln["voice"] = "M" if (i // 2) % 2 == 0 else "F"
-        return {"tagged": len(lines), "mock": True}
+            ln["voice"] = ln.get("mark") or ("M" if (i // 2) % 2 == 0 else "F")
+        return {"tagged": len(lines), "mock": True, "method": "mock",
+                "marked": sum(1 for ln in lines if ln.get("mark"))}
     _tag_voices(job, out, tag)
 
 

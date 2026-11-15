@@ -25,6 +25,7 @@ tagged as the other singer; lines sung together get one of the two tags.
 from __future__ import annotations
 
 import logging
+import re
 
 import numpy as np
 
@@ -135,10 +136,11 @@ def _two_groups(values: np.ndarray) -> tuple[float, float]:
     return float(2 ** lo), float(2 ** hi)
 
 
-# ----------------------------------------------------------------- public
-def tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
-    """Add "voice": "M" / "F" / None to each lyric line (in place).
-    audio: 16 kHz mono float32 vocals. Returns calibration info."""
+# ----------------------------------------------------------------- pitch tagger
+def pitch_tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
+    """Add "voice": "M" / "F" / None to each lyric line (in place), from pitch.
+    audio: 16 kHz mono float32 vocals. Returns calibration info, including
+    each line's typical pitch ("medians", Hz or None)."""
     s = _spectrum(audio)
     T = s.shape[1]
     # singing frames: within 30 dB of the loud parts
@@ -156,13 +158,15 @@ def tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
         a = max(0, int(ln["start"] * 100)); b = min(T, int(ln["end"] * 100) + 1)
         spans.append((a, b) if b - a > 0 and voiced[a:b].sum() >= MIN_VOICED else None)
     medians = np.array([np.median(f1[a:b][voiced[a:b]]) for sp in spans if sp for a, b in [sp]])
+    line_hz = [float(np.median(f1[a:b][voiced[a:b]])) if sp else None for sp in spans for a, b in [sp or (0, 0)]]
     for ln in lines:
         ln["voice"] = None
     if len(medians) < 4:
-        return {"tagged": 0, "reason": "too few sung lines"}
+        return {"tagged": 0, "reason": "too few sung lines", "medians": line_hz}
     lo, hi = _two_groups(medians)
     if 1200 * np.log2(hi / lo) < 300:          # less than 3 semitones apart
-        return {"tagged": 0, "reason": "could not find two separate voice ranges", "low_hz": lo, "high_hz": hi}
+        return {"tagged": 0, "reason": "could not find two separate voice ranges", "low_hz": lo, "high_hz": hi,
+                "medians": line_hz}
     th = float(np.sqrt(lo * hi))
 
     male_band = (CANDS >= lo / 1.5) & (CANDS <= th * 1.06)
@@ -178,7 +182,8 @@ def tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
     nm, nf = np.median(male_ev[voiced]) + 1e-6, np.median(fem_ev[voiced]) + 1e-6
 
     n = 0
-    for ln, sp in zip(lines, spans):
+    evidence = [None] * len(lines)
+    for li, (ln, sp) in enumerate(zip(lines, spans)):
         if not sp:
             continue
         a, b = sp
@@ -186,6 +191,7 @@ def tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
         m = male_ev[a:b][v].mean() / nm
         f = fem_ev[a:b][v].mean() / nf
         share = np.mean(f1[a:b][v] >= th)      # main voice above the boundary
+        evidence[li] = (float(m), float(f), float(share))
         if share > 0.85:
             ln["voice"] = "F"                   # clearly high: follow the pitch
         elif share < 0.15:
@@ -193,4 +199,192 @@ def tag_lines(audio: np.ndarray, lines: list[dict]) -> dict:
         else:
             ln["voice"] = "F" if f > m else "M"
         n += 1
-    return {"tagged": n, "low_hz": round(lo, 1), "high_hz": round(hi, 1), "boundary_hz": round(th, 1)}
+    return {"tagged": n, "low_hz": round(lo, 1), "high_hz": round(hi, 1), "boundary_hz": round(th, 1),
+            "medians": line_hz, "evidence": evidence}
+
+
+# ----------------------------------------------------------------- voice identity (speaker embeddings)
+# A speaker-embedding model turns a stretch of voice into a "voice fingerprint"
+# (timbre), which, unlike pitch, doesn't change when a man sings high or a
+# woman sings low. Lines are grouped into the song's two voices by fingerprint;
+# only then is each group named M or F, by its overall pitch (or by the lyric
+# marks 男/女 when some lines have them). Model: WeSpeaker ResNet34 (VoxCeleb,
+# CC-BY-4.0), ONNX, run with ONNX Runtime on the CPU.
+EMB_MODEL = "wespeaker_en_voxceleb_resnet34_LM.onnx"
+EMB_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+           "speaker-recongition-models/" + EMB_MODEL)
+MIN_EMB_SEC = 1.0          # a line needs this much singing for a fingerprint
+_emb_sess = None
+
+
+def _mel_bank(n_fft=512, n_mels=80, sr=16000, fmin=20.0, fmax=8000.0):
+    mel = lambda f: 1127.0 * np.log(1.0 + f / 700.0)   # Kaldi's mel scale
+    bins = np.arange(n_fft // 2 + 1) * sr / n_fft
+    m = mel(bins)
+    pts = np.linspace(mel(fmin), mel(fmax), n_mels + 2)
+    fb = np.zeros((n_mels, len(bins)), np.float32)
+    for i in range(n_mels):
+        l, c, r = pts[i], pts[i + 1], pts[i + 2]
+        up, down = (m - l) / (c - l), (r - m) / (r - c)
+        fb[i] = np.maximum(0, np.minimum(up, down))
+    return fb
+
+
+_MEL = None
+
+
+def fbank(audio: np.ndarray, scale: float = 32768.0) -> np.ndarray:
+    """80-band log-mel filterbank like Kaldi's (25 ms frames, 10 ms hop, Povey
+    window, pre-emphasis), mean-normalised: the input WeSpeaker models expect."""
+    global _MEL
+    if _MEL is None:
+        _MEL = _mel_bank()
+    x = audio.astype(np.float32) * scale
+    if len(x) < 400:
+        x = np.pad(x, (0, 400 - len(x)))
+    fr = np.lib.stride_tricks.sliding_window_view(x, 400)[::160].copy()
+    fr -= fr.mean(1, keepdims=True)
+    fr[:, 1:] -= 0.97 * fr[:, :-1]
+    fr[:, 0] *= 1 - 0.97
+    win = (0.5 - 0.5 * np.cos(2 * np.pi * np.arange(400) / 399)) ** 0.85
+    spec = np.abs(np.fft.rfft(fr * win, n=512)) ** 2
+    feats = np.log(np.maximum(spec @ _MEL.T, np.finfo(np.float32).eps))
+    return (feats - feats.mean(0, keepdims=True)).astype(np.float32)
+
+
+def _embedder(models_dir):
+    global _emb_sess
+    if _emb_sess is None:
+        import onnxruntime as ort
+        path = models_dir / EMB_MODEL
+        if not path.exists():
+            import urllib.request
+            models_dir.mkdir(parents=True, exist_ok=True)
+            log.info("downloading the voice fingerprint model (%s, 26 MB) ...", EMB_MODEL)
+            tmp = path.with_suffix(".part")
+            urllib.request.urlretrieve(EMB_URL, tmp)
+            tmp.replace(path)
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        _emb_sess = ort.InferenceSession(str(path), so, providers=["CPUExecutionProvider"])
+    return _emb_sess
+
+
+def embed(sess, audio: np.ndarray) -> np.ndarray:
+    f = fbank(audio)[None]
+    e = sess.run(None, {sess.get_inputs()[0].name: f})[0][0]
+    return e / (np.linalg.norm(e) + 1e-9)
+
+
+def _two_clusters(E: np.ndarray, iters: int = 30):
+    """Split unit vectors into two groups (spherical 2-means, started from the
+    two most different lines). Returns labels (0/1) and the two centres."""
+    S = E @ E.T
+    i, j = np.unravel_index(np.argmin(S), S.shape)
+    C = E[[i, j]].copy()
+    lab = np.zeros(len(E), int)
+    for _ in range(iters):
+        new = (E @ C.T).argmax(1)
+        if (new == lab).all() and _ > 0:
+            break
+        lab = new
+        for k in range(2):
+            if (lab == k).any():
+                c = E[lab == k].mean(0)
+                C[k] = c / (np.linalg.norm(c) + 1e-9)
+    return lab, C
+
+
+def tag_lines(audio: np.ndarray, lines: list[dict], models_dir=None, method: str = "auto") -> dict:
+    """Add "voice" M / F to each lyric line (in place). Lines with a lyric mark
+    (line["mark"] = "M" / "F" / "B", from 男：/女：/合： in the lyrics) keep it.
+
+    method "auto": voice fingerprints, falling back to pitch if the model
+    can't be loaded or the song doesn't split into two clear voices;
+    "pitch": the pitch tagger only."""
+    marks = {i: ln["mark"] for i, ln in enumerate(lines) if ln.get("mark")}
+    info = pitch_tag_lines(audio, lines)
+    hz = info.pop("medians", None) or [None] * len(lines)
+    evidence = info.pop("evidence", None) or [None] * len(lines)
+    pitch_voice = [ln.get("voice") for ln in lines]
+    info["method"] = "pitch"
+    if method != "pitch" and models_dir is not None:
+        try:
+            info.update(_fingerprint_tags(audio, lines, models_dir, hz, marks, evidence))
+        except Exception as e:  # noqa: BLE001
+            log.warning("voice fingerprints failed (%s); using pitch tags", e)
+            for ln, v in zip(lines, pitch_voice):
+                ln["voice"] = v
+            info["method"] = "pitch"
+            info["fingerprint_error"] = str(e)
+    for i, m in marks.items():                    # lyric marks always win
+        lines[i]["voice"] = m
+    info["marked"] = len(marks)
+    return info
+
+
+def _fingerprint_tags(audio, lines, models_dir, hz, marks, evidence=None) -> dict:
+    sess = _embedder(models_dir)
+    idx, embs = [], []
+    for i, ln in enumerate(lines):
+        if marks.get(i) == "B":                    # sung together: a mix of both voices
+            continue
+        a, b = int(max(0, ln["start"]) * SR), int(min(len(audio) / SR, ln["end"]) * SR)
+        seg = audio[a:b]
+        if len(seg) < MIN_EMB_SEC * SR or np.sqrt(np.mean(seg ** 2)) < 1e-3:
+            continue
+        idx.append(i)
+        embs.append(embed(sess, seg))
+    if len(idx) < 4:
+        return {"method": "pitch", "fingerprint": "too few lines with enough singing"}
+    E = np.stack(embs)
+    lab, C = _two_clusters(E)
+    sep = float(C[0] @ C[1])                       # similarity of the two voices (1 = same)
+    sizes = [int((lab == 0).sum()), int((lab == 1).sum())]
+    if min(sizes) < 2 or sep > 0.85:
+        return {"method": "pitch", "fingerprint": f"no two clear voices (similarity {sep:.2f})"}
+    # Name the groups: lyric marks if there are any, else overall pitch.
+    votes = [0.0, 0.0]                             # evidence that group k is female
+    for k_line, i in enumerate(idx):
+        if marks.get(i) in ("M", "F"):
+            votes[lab[k_line]] += 1 if marks[i] == "F" else -1
+    if votes[0] != votes[1]:
+        fem = 0 if votes[0] > votes[1] else 1
+        named_by = "lyric marks"
+    else:
+        med = []
+        for k in range(2):
+            h = [hz[i] for k_line, i in enumerate(idx) if lab[k_line] == k and hz[i]]
+            med.append(float(np.median(h)) if h else 0.0)
+        fem = 0 if med[0] > med[1] else 1
+        named_by = f"pitch ({med[0]:.0f} vs {med[1]:.0f} Hz)"
+    sims = E @ C.T
+    margin = np.abs(sims[:, 0] - sims[:, 1])
+    voice = ["F" if l == fem else "M" for l in lab]
+    # Unsure lines (nearly as close to both voices) follow their neighbours
+    # when both neighbours agree: singers usually trade whole lines/verses.
+    for k in range(1, len(voice) - 1):
+        if margin[k] < 0.04 and voice[k - 1] == voice[k + 1] != voice[k]:
+            voice[k] = voice[k - 1]
+    # Sung together ("B"): the line's fingerprint is a mix, so it is fairly
+    # close to BOTH voices (its similarity to the farther voice is high for
+    # this song), and the pitch analysis finds a male and a female voice at
+    # the same time. A part in brackets ("... (echo)") is usually the other
+    # singer joining in, which counts as extra evidence.
+    near_both = sims.min(1)
+    thr = max(0.48, float(np.median(near_both)) + 0.08)
+    both = 0
+    evidence = evidence or [None] * len(lines)
+    for k, i in enumerate(idx):
+        ev = evidence[i]
+        two_pitches = bool(ev) and ev[0] >= 0.85 and ev[1] >= 1.0
+        bracket = bool(re.search(r"[\(（][^\)）]{2,}[\)）]", lines[i].get("text") or ""))
+        if (near_both[k] >= thr and two_pitches) or (bracket and near_both[k] >= thr - 0.05):
+            voice[k] = "B"
+            both += 1
+    by_line = dict(zip(idx, voice))
+    for i, ln in enumerate(lines):
+        if i in by_line:
+            ln["voice"] = by_line[i]
+    return {"method": "fingerprint", "fingerprinted": len(idx), "voice_similarity": round(sep, 3),
+            "groups": sizes, "named_by": named_by, "together": both}

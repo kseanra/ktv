@@ -32,10 +32,10 @@
   /* --lyr-scale is the shared lyrics size (A- / A+ on the TV or a phone). */
   .slot { font-size: calc(clamp(20px, 3.3vw, 56px) * var(--lyr-scale, 1.2)); font-weight: 800; line-height: 1.35; min-height: 1.35em; }
   .slot.top { text-align: left; } .slot.bottom { text-align: right; }
-  .v-M { --sung: #57b8ff; } .v-F { --sung: #ff6fb3; }    /* duet: male blue, female pink */
+  .v-M { --sung: #57b8ff; } .v-F { --sung: #ff6fb3; } .v-B { --sung: #3ddc84; }   /* duet: male blue, female pink, both (together) green */
   .vtag { display: inline-block; font-size: .55em; font-weight: 800; padding: .08em .4em; margin-right: .35em;
           border-radius: .3em; vertical-align: .35em; color: #0b0a10; line-height: 1.2; }
-  .vtag-M { background: #57b8ff; } .vtag-F { background: #ff6fb3; }
+  .vtag-M { background: #57b8ff; } .vtag-F { background: #ff6fb3; } .vtag-B { background: #3ddc84; }
   .word { --p: 0%; background: linear-gradient(90deg, var(--sung) var(--p), var(--unsung) var(--p));
           -webkit-background-clip: text; background-clip: text; color: transparent; white-space: pre-wrap; }
   .countdown { position: absolute; left: 6%; bottom: calc(6% + 2 * clamp(20px, 3.3vw, 56px) * var(--lyr-scale, 1.2) * 1.35 + 8px);
@@ -129,6 +129,18 @@
   .addbtns button { width: 100%; }
   .lyrq { display: grid; gap: 6px; font-size: 14px; }
   .redo { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+  .vtags { border-top: 1px solid var(--line); padding-top: 10px; }
+  .vtags summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  .vtags summary span { font-weight: 400; color: var(--dim); font-size: 12px; }
+  .vt-help { font-size: 12px; color: var(--dim); margin: 6px 0; }
+  .vt-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .modal-card .vt-bar button { padding: 6px 12px; font-size: 13px; }
+  #vtList { display: grid; gap: 4px; max-height: 45vh; overflow-y: auto; }
+  .vt-row { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+  .vt-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal-card .vt-row button { min-width: 56px; padding: 4px 8px; font-size: 13px; font-weight: 700; color: #111; border: 0; }
+  .vt-row button.t-none { background: #2a2733; color: var(--dim); }
+  .vt-row button.t-M { background: #57b8ff; } .vt-row button.t-F { background: #ff6fb3; } .vt-row button.t-B { background: #3ddc84; }
   .redo-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
   .redo-row span { flex-basis: 100%; }
   .redo-row select { flex: 1; min-width: 0; }
@@ -462,6 +474,13 @@
     <div class="msg" id="lyrMsg"></div>
     <div class="addbtns"><button id="lyrClose" type="button">Close</button><button class="primary" id="lyrSave" type="button">Save &amp; sync</button></div>
     <button id="lyrAI" type="button" class="linkbtn">Use the AI's lyrics instead</button>
+    <details class="vtags hidden" id="lyrVoices">
+      <summary>Singer tags (duet) <span id="lyrVoicesInfo"></span></summary>
+      <div class="vt-help">Tap a tag to change it: M → F → B (both together) → none.</div>
+      <div class="vt-bar"><button type="button" id="vtSwap">Swap M ↔ F</button><button type="button" id="vtClear">Clear all</button>
+        <button type="button" class="primary" id="vtSave">Save tags</button></div>
+      <div id="vtList"></div>
+    </details>
     <div class="redo" id="lyrRedo">
       <div class="redo-row"><span>Redo the AI lyrics as</span>
         <select id="redoLang">
@@ -1557,6 +1576,7 @@ async function openLyrics(id) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Could not load the lyrics");
     lyrSong = d;
+    initVoiceEditor(d);
     $("lyrWhat").textContent = d.title || id;
     const src = lyrSourceText(d);
     $("lyrSrc").textContent = src.text; $("lyrSrc").classList.toggle("warn", src.warn);
@@ -1632,6 +1652,49 @@ $("lyrSave").onclick = () => {
   saveLyrics(lyrChosen && text === lyrChosen.plain ? { lrclib_id: lyrChosen.id, query: lyrChosen.query } : { text });
 };
 $("lyrAI").onclick = () => saveLyrics({ use_ai: true });
+// ---- singer tags (duet): fix by hand ----
+let vtVoices = [];
+const VT_NEXT = { null: "M", M: "F", F: "B", B: null };
+const vtLabel = (v) => v === "M" ? voiceLabels[0] : v === "F" ? voiceLabels[1] : v === "B" ? (voiceLabels[2] || "B") : "–";
+const VT_SOURCE = { fingerprint: "by voice fingerprint", pitch: "by pitch", lyrics: "from the lyrics (男/女/合)", manual: "fixed by hand", mock: "mock" };
+function initVoiceEditor(d) {
+  const lines = d.lines || [];
+  $("lyrVoices").classList.toggle("hidden", !lines.length);
+  $("lyrVoices").open = false;
+  vtVoices = lines.map((l) => l.voice || null);
+  const n = vtVoices.filter(Boolean).length;
+  $("lyrVoicesInfo").textContent = n ? `· ${n} of ${lines.length} lines tagged ${VT_SOURCE[d.voice_source] || ""}` : "· none yet";
+  renderVoiceEditor(lines);
+}
+function renderVoiceEditor(lines) {
+  lines = lines || (lyrSong && lyrSong.lines) || [];
+  $("vtList").innerHTML = lines.map((l, i) => `<div class="vt-row">
+      <button type="button" data-vi="${i}" class="t-${vtVoices[i] || "none"}">${esc(vtLabel(vtVoices[i]))}</button>
+      <span title="${esc(l.text)}">${esc(l.text)}</span></div>`).join("");
+}
+$("vtList").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-vi]"); if (!b) return;
+  const i = +b.dataset.vi;
+  vtVoices[i] = VT_NEXT[vtVoices[i]] ?? null;
+  b.className = `t-${vtVoices[i] || "none"}`; b.textContent = vtLabel(vtVoices[i]);
+});
+$("vtSwap").onclick = () => { vtVoices = vtVoices.map((v) => v === "M" ? "F" : v === "F" ? "M" : v); renderVoiceEditor(); };
+$("vtClear").onclick = () => { vtVoices = vtVoices.map(() => null); renderVoiceEditor(); };
+$("vtSave").onclick = async () => {
+  if (!lyrSong) return;
+  $("vtSave").disabled = true;
+  try {
+    const r = await fetch(`/api/lyrics/${lyrSong.video_id}/voices`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voices: vtVoices }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not save the tags");
+    toast(`Singer tags saved (${d.tagged} lines).`);
+    $("lyrVoicesInfo").textContent = `· ${d.tagged} of ${vtVoices.length} lines tagged fixed by hand`;
+    poll();
+  } catch (err) { $("lyrMsg").className = "msg err"; $("lyrMsg").textContent = err.message; }
+  finally { $("vtSave").disabled = false; }
+};
+
 const langName = (v) => ({ "": "auto-detect", auto: "auto-detect", yue: "Cantonese", zh: "Mandarin", en: "English", ja: "Japanese", ko: "Korean" })[v ?? ""] || v;
 $("redoBtn").onclick = async () => {
   if (!lyrSong) return;
@@ -1736,12 +1799,12 @@ $("offMinus").onclick = () => setOff(-0.1);
 $("offPlus").onclick = () => setOff(0.1);
 
 // ---------------- lyrics: two alternating lines, word-by-word fill ----------------
-let voiceLabels = ["M", "F"];
+let voiceLabels = ["M", "F", "B"];
 function lineHTML(line) {
   const words = line.words.map((w) => `<span class="word" data-s="${w.s}" data-e="${w.e}">${esc(w.w)}</span>`).join("");
   if (!line.voice) return words;
   // Duet: a coloured tag in front, and the line fills in that singer's colour.
-  const label = line.voice === "M" ? voiceLabels[0] : voiceLabels[1];
+  const label = line.voice === "M" ? voiceLabels[0] : line.voice === "F" ? voiceLabels[1] : (voiceLabels[2] || "B");
   return `<span class="v-${line.voice}"><span class="vtag vtag-${line.voice}">${esc(label)}</span>${words}</span>`;
 }
 

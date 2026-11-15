@@ -157,3 +157,83 @@ full Chinese list:
   lyricists rather than singers.
 - If very large result sets stop paging (a search-service limit), the update
   keeps what it got and logs a warning.
+
+
+## 2026-11-15 · Male / female duet tags: voice fingerprints instead of pitch
+
+**Status:** decided, built (`app/voices.py`, `app/lyrics_sync.py`, Lyrics window).
+
+### Problem
+
+Duet lines were tagged M / F from pitch only. A man singing high or a woman
+singing low got the wrong tag; measured on known-answer test duets, pitch got
+about 68-72% of lines right.
+
+### Decision
+
+Three parts, used together:
+
+1. **Lyric marks first.** Duet lyrics (online or pasted) often say who sings:
+   `男：`, `女：`, `合：`, `(男)`, `【女】`, `M:`, `F:`, `Both:`. A mark applies to
+   its line and the following lines until the next mark. Marked lines get
+   their tag straight away (M, F, or B for 合), with no audio analysis, and
+   the duet step keeps them.
+2. **Voice fingerprints (speaker embeddings)** for the other lines. Each line's
+   separated vocals go through **WeSpeaker ResNet34** (trained on VoxCeleb,
+   CC-BY-4.0, 26 MB ONNX, run with ONNX Runtime on the CPU; no PyTorch, so it
+   also works on the Mac). This gives a timbre "fingerprint" that doesn't
+   change with how high a note is. The lines are split into the song's two
+   voices (spherical 2-means); only then is each group named M or F, by lyric
+   marks if any, else by the group's overall pitch (reliable when averaged
+   over many lines). Lines nearly as close to both voices follow their
+   neighbours. If the song doesn't split into two clear voices, or the model
+   can't load, the pitch tags are used. The model is downloaded once from the
+   sherpa-onnx GitHub release (Hugging Face is blocked on this network).
+   `KARAOKE_VOICE_METHOD=pitch` switches back to pitch only.
+3. **Fix by hand.** The Lyrics window has *Singer tags*: tap a line's tag to
+   cycle M → F → B → none, *Swap M ↔ F*, *Save tags*. Saved tags are kept as
+   marks, so re-tagging doesn't undo them.
+
+### Update (2026-11-15): lines sung together ("B", green)
+
+Lines where both sing were still given one singer. They are now detected and
+shown as **B** with a **green** highlight (labels: M blue, F pink, B green):
+
+- the line's fingerprint is a mix, so it is fairly close to *both* voices: its
+  similarity to the farther voice is high for this song (above the song's
+  median + 0.08, at least 0.48), **and**
+- the pitch analysis finds a male and a female voice at the same time
+  (male evidence >= 0.85 and female evidence >= 1.0 of the song's typical level);
+- or the lyric line has a part in brackets ("... (echo)"), usually the other
+  singer joining in, and the line is nearly as close to both voices;
+- lyric marks `合：` (and hand fixes) still win.
+
+On *A Whole New World* this tagged 10 lines B; 8-9 of them are the together or
+echo lines (one solo high line was a false B), and some together lines were
+missed. On *祝君好* (Kelly x Chilam) both "雖不可親口細訴" lines and the final
+line came out B. Wrong ones can be fixed in *Singer tags*.
+
+### Results (test run on this PC's library)
+
+- Known-answer test duets built from a male and a female solo song from the
+  library (6 pairs, 246 lines): pitch **69.5%**, fingerprints **99.6%**. These
+  tests are easier than real duets (the two voices come from different
+  recordings), so real duets will score lower.
+- Real duet, *A Whole New World* (Peabo Bryson / Regina Belle): in the solo
+  verses, fingerprints matched the known singer on most lines where pitch
+  failed (e.g. the female verse that pitch tagged M).
+- Takes about 8 s per song extra on the CPU.
+
+### Considered and not chosen
+
+- A per-line gender classifier (e.g. an ECAPA voice-gender model, 98.7% on
+  speech): needs PyTorch (removed for the Intel Mac), and judges each line on
+  its own; adds little over fingerprints plus group naming.
+- Using the video (faces): the user doesn't want to use the video.
+
+### Limits
+
+- Lines sung together are found from the audio only roughly (see the B
+  update above); lyric marks (合) are exact.
+- The model was trained on speech, not singing; very similar voices, heavy
+  effects or backing vocals can still confuse it.

@@ -139,15 +139,27 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   - **Skip lyrics**: only remove the vocals (saves the lyrics step). The vocals are kept, so adding the song again with
   the box unticked extracts the lyrics later, without redoing anything else.
   - **Male + female duet**: each lyric line gets
-  an **M** or **F** tag, with male lines filling blue and female lines pink.
-  It works from pitch alone (see `app/voices.py`): the song's two voice
-  ranges are found automatically, then each line goes to whichever singer's
-  evidence is stronger. Expect roughly 6-8 of 10 lines right: a man's high
-  chorus lines and a woman's low verse lines can get the other tag, and lines
-  sung together get one of the two. Adding a finished song again from History
-  with the box ticked only runs the tagging (about 2 s), because a small copy
-  of the vocals (`vocals16k.flac`, ~4 MB) is kept. Labels can be changed, e.g.
-  `set KARAOKE_VOICE_LABELS=男,女`.
+  an **M**, **F** or **B** (both together) tag, filling blue, pink or green.
+  1. Lyric marks come first: lyrics (online or pasted) with `男：`, `女：`,
+     `合：`, `(男)`, `【女】`, `M:`, `F:` are tagged from those marks directly
+     (合 = B).
+  2. Other lines: **voice fingerprints**. Each line's vocals go through the
+     WeSpeaker speaker-embedding model (26 MB, downloaded once into
+     `data/models`, runs on the CPU with ONNX Runtime), which captures the
+     voice's timbre rather than its pitch. The lines are split into the song's
+     two voices, and each voice is named M or F by its overall pitch. On test
+     duets this got 99.6% of lines right versus 69.5% from pitch alone (real
+     duets score lower). Falls back to pitch if the song doesn't split into
+     two clear voices. Lines sung together are found when the line sounds
+     like a mix of both voices and two pitches are heard at once (or a part
+     in brackets suggests the other singer joins in) and are tagged B.
+     `set KARAOKE_VOICE_METHOD=pitch` uses pitch only.
+  3. **Fix by hand**: Lyrics window → *Singer tags*: tap a tag to cycle
+     M → F → B → none, *Swap M ↔ F*, *Save tags* (kept through re-tagging).
+  Adding a finished song again from History with the box ticked only runs
+  the tagging (about 10 s), because a small copy of the vocals
+  (`vocals16k.flac`, ~4 MB) is kept. Labels can be changed, e.g.
+  `set KARAOKE_VOICE_LABELS=男,女,合`. Why: [decision.md](decision.md).
 - **History** tab: every song downloaded so far, newest played first, with a
   search box. *+ Add* puts it back in the playlist; finished songs are ready
   instantly.
@@ -318,6 +330,7 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 | GET | `/api/search?q=...&limit=30` | YouTube search: `[{video_id, title, channel, duration, views, thumbnail, ready, in_playlist}]` |
 | GET | `/api/lyrics/{id}` | current lyrics as text + where they came from |
 | GET | `/api/lyrics/{id}/search?q=` | LRCLIB results for the song (best first) |
+| POST | `/api/lyrics/{id}/voices` | `{voices: ["M"|"F"|"B"|null, ...]}` singer tags fixed by hand (B = both) |
 | POST | `/api/lyrics/{id}/redo` | `{language?}` run the AI lyrics again (`yue` = Cantonese model, empty = auto) |
 | POST | `/api/lyrics/{id}` | `{text?}` paste, `{lrclib_id?}` use an LRCLIB entry, or `{use_ai: true}` |
 | GET | `/api/singers?q=&region=&offset=` | singer list (stored locally) |

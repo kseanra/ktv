@@ -91,20 +91,37 @@ def norm(s: str) -> str:
 
 
 # ----------------------------------------------------------------- reference text
+# Duet lyrics often say who sings: "男：", "女：", "合：", "(男)", "【女】",
+# "M:", "F:", "Both:". A mark applies to its line and the following lines,
+# until the next mark (a mark alone on a line just switches the singer).
+_MARK = re.compile(
+    r"^\s*(?:[\(（\[【〔]\s*(男女|男|女|合|male|female|both|m|f)\s*[\)）\]】〕]\s*[:：]?"
+    r"|(男女|男|女|合|male|female|both|m|f)\s*[:：])\s*", re.I)
+_MARK_VOICE = {"男": "M", "m": "M", "male": "M", "女": "F", "f": "F", "female": "F",
+               "合": "B", "男女": "B", "both": "B"}
+
+
 def parse_lyrics_text(text: str) -> list[dict]:
-    """Pasted or downloaded lyrics -> [{"text", "t"}]. Understands plain text
-    (one line per row) and LRC ("[01:23.45] line"). Credit lines are dropped."""
+    """Pasted or downloaded lyrics -> [{"text", "t", "voice"}]. Understands
+    plain text (one line per row) and LRC ("[01:23.45] line"), and duet marks
+    (男：/女：/合：), which give "voice" M / F / B. Credit lines are dropped."""
     out = []
+    current = None
     for raw in (text or "").splitlines():
         tags = re.findall(r"\[(\d+):(\d+(?:[.:]\d+)?)\]", raw)
-        body = re.sub(r"\[[^\]]*\]", "", raw).strip()
+        body = re.sub(r"\[\d+:\d+(?:[.:]\d+)?\]", "", raw)              # times
+        body = re.sub(r"\[[a-z]+:[^\]]*\]", "", body, flags=re.I).strip()  # [ar:...] etc.
+        m = _MARK.match(body)
+        if m:
+            current = _MARK_VOICE[(m.group(1) or m.group(2)).lower()]
+            body = body[m.end():].strip()
         if not body or _CREDIT.match(body):
             continue
         if not _UNIT.search(body):
             continue
-        times = [int(m) * 60 + float(s.replace(":", ".")) for m, s in tags] or [None]
+        times = [int(mm) * 60 + float(ss.replace(":", ".")) for mm, ss in tags] or [None]
         for t in times:
-            out.append({"text": body, "t": t})
+            out.append({"text": body, "t": t, "voice": current})
     if any(x["t"] is not None for x in out):
         out.sort(key=lambda x: (x["t"] is None, x["t"] or 0))
     return out
@@ -126,7 +143,8 @@ def _split_long(lines: list[dict]) -> list[dict]:
                 if best is None or abs(k - mid) < abs(best - mid):
                     best, cut = k, units[k].start()
         a, b = ln["text"][:cut].strip(), ln["text"][cut:].strip()
-        out += _split_long([{"text": a, "t": ln["t"]}]) + _split_long([{"text": b, "t": None}])
+        out += (_split_long([{"text": a, "t": ln["t"], "voice": ln.get("voice")}])
+                + _split_long([{"text": b, "t": None, "voice": ln.get("voice")}]))
     return out
 
 
@@ -286,7 +304,10 @@ def align(ref_lines: list[dict], words: list[dict], duration: float | None = Non
         if not idx:
             continue
         ws = [{"w": ref[i][1], "s": round(s[i], 3), "e": round(e[i], 3)} for i in idx]
-        lines.append({"start": ws[0]["s"], "end": ws[-1]["e"], "text": ln["text"], "words": ws})
+        line = {"start": ws[0]["s"], "end": ws[-1]["e"], "text": ln["text"], "words": ws}
+        if ln.get("voice"):                    # duet mark from the lyrics (男/女/合)
+            line["voice"] = line["mark"] = ln["voice"]
+        lines.append(line)
     return lines, stats
 
 
@@ -550,9 +571,16 @@ def apply_text(out: Path, text: str, duration: float | None, source: dict,
         raise ValueError(stats.get("reason", "Could not time these lyrics."))
     if min_match is not None and words and stats["match"] < min_match:
         raise ValueError(f"only {stats['match']:.0%} matched what is sung")
+    marked = [ln["voice"] for ln in lines if ln.get("mark")]
     lyrics = {"language": ai.get("language"), "lines": lines, "source": source.get("kind", "pasted"),
               "source_info": {**source, **stats},
               "source_text": text}          # kept, so it can be re-timed after "Redo AI lyrics"
+    if marked:
+        # The lyrics say who sings each line: show those tags straight away
+        # (the duet step, if run, keeps them and only fills unmarked lines).
+        lyrics["duet"] = True
+        lyrics["voice_source"] = "lyrics"
+        stats["marked_lines"] = len(marked)
     (out / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False), encoding="utf-8")
     log.info("lyrics for %s from %s: %d lines, %.0f%% matched", out.name, lyrics["source"], len(lines), stats["match"] * 100)
     return stats

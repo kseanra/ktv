@@ -398,6 +398,9 @@ def get_lyrics(video_id: str):
         "source_info": lyr.get("source_info") or {},
         "text": "\n".join(ln.get("text", "") for ln in lyr.get("lines", [])),
         "has_ai": lyrics_sync.whisper_lyrics(d) is not None,
+        # for the singer-tag editor: each line's text and M / F / B tag
+        "lines": [{"text": ln.get("text", ""), "voice": ln.get("voice")} for ln in lyr.get("lines", [])],
+        "voice_source": lyr.get("voice_source") if any(ln.get("voice") for ln in lyr.get("lines", [])) else None,
         # "Redo AI lyrics" needs the saved vocals
         # "Redo AI lyrics" uses the saved vocals, or separates them again from the video
         "can_redo": (d / "video.mp4").exists(),
@@ -438,6 +441,36 @@ async def search_lyrics(video_id: str, q: str = ""):
     return [{"id": c["id"], "track": c["track"], "artist": c["artist"], "album": c["album"],
              "duration": c["duration"], "synced": bool(c["synced"]), "likely": c["score"] >= 4,
              "text": lyrics_sync.candidate_text(c)} for c in found[:15]]
+
+
+class VoicesUpdate(BaseModel):
+    voices: list[str | None]       # one per lyric line: "M", "F", "B" (both) or None
+
+
+@app.post("/api/lyrics/{video_id}/voices")
+def set_voices(video_id: str, body: VoicesUpdate):
+    """Singer tags fixed by hand. They are kept as marks, so re-tagging the
+    duet later doesn't undo them."""
+    d = _song_dir(video_id)
+    lyr = _read_json(d / "lyrics.json")
+    lines = lyr.get("lines") or []
+    if len(body.voices) != len(lines):
+        raise HTTPException(409, "The lyrics changed meanwhile. Open the Lyrics window again.")
+    for ln, v in zip(lines, body.voices):
+        v = v if v in ("M", "F", "B") else None
+        ln["voice"] = v
+        if v:
+            ln["mark"] = v
+        else:
+            ln.pop("mark", None)
+    lyr["duet"] = any(ln.get("voice") for ln in lines)
+    lyr["voice_source"] = "manual"
+    import json
+    (d / "lyrics.json").write_text(json.dumps(lyr, ensure_ascii=False), encoding="utf-8")
+    job = manager.jobs.get(video_id)
+    if job:
+        job.has_voices = lyr["duet"]
+    return {"ok": True, "tagged": sum(1 for ln in lines if ln.get("voice"))}
 
 
 class LyricsRedo(BaseModel):
