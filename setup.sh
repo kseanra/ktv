@@ -110,7 +110,7 @@ fi
 info "checking the installation"
 # Each library is imported in its own process: on Intel Macs, PyTorch and
 # Whisper must never be loaded together (see above).
-mods=(fastapi uvicorn yt_dlp faster_whisper openvino soundfile imageio_ffmpeg truststore certifi segno opencc ToJyutping)
+mods=(fastapi uvicorn yt_dlp faster_whisper openvino onnxruntime soundfile imageio_ffmpeg truststore certifi segno opencc ToJyutping)
 [[ "$ARCH" == arm64 ]] && mods+=(torch demucs)
 problems=0
 for m in $mods; do
@@ -133,6 +133,14 @@ EOF
 )"
 "$VPY" -c "$check_code" || problems=1
 (( problems == 0 )) || fail "some packages did not install correctly (see PROBLEM lines above)."
+
+# Voice fingerprint model for duet M/F/B tags (WeSpeaker, 26 MB, from GitHub):
+# downloaded now so the first duet doesn't wait, and to check ONNX Runtime runs.
+if "$VPY" -c 'import app.config as c; from app.voices import _embedder; _embedder(c.MODELS_DIR)' 2>/dev/null; then
+  info "voice fingerprint model ready (duet tags)"
+else
+  warn "could not get the voice fingerprint model now; duet tags will try again (or use pitch) when needed."
+fi
 
 # HTTPS must work (python.org builds have no root certificates; the app uses
 # the macOS Keychain via truststore, this checks that it really works).

@@ -92,6 +92,11 @@ prints it). Allow incoming connections for Python if macOS asks.
   then a segmentation fault). Re-running `zsh setup.sh` removes a PyTorch an
   older setup installed.
 - A `.venv` copied over from Windows is set aside and a Mac one is created.
+- Same behaviour as the Windows scripts: `run.sh` keeps Whisper on the CPU
+  (`KARAOKE_DEVICE=cpu`, like `run.bat`; set it yourself to override), and
+  `setup.sh` also checks ONNX Runtime and downloads the voice fingerprint
+  model for duet tags (26 MB) up front. `reset-gpu.bat` has no Mac version:
+  the NVIDIA packages it removes are never installed on a Mac.
 - HTTPS certificates: Python from python.org has no root certificates of its
   own, which made downloads fail with `CERTIFICATE_VERIFY_FAILED`. The app now
   verifies against the macOS Keychain (the `truststore` package). If you still
