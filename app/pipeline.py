@@ -380,6 +380,12 @@ class RealPipeline:
             run_ffmpeg("-i", str(out / "instrumental.wav"), "-b:a", "192k", str(out / "instrumental.mp3"))
             (out / "instrumental.wav").unlink(missing_ok=True)
         (out / "audio.wav").unlink(missing_ok=True)
+        if getattr(job, "melody_only", False):
+            # Getting an older song ready for scoring: keep the 16 kHz vocals,
+            # make the melody, and leave the lyrics as they are.
+            run_ffmpeg("-i", str(out / "vocals.wav"), "-ac", "1", "-ar", "16000", str(out / "vocals16k.flac"))
+            (out / "vocals.wav").unlink(missing_ok=True)
+            _make_melody(out)
 
     # ---------- stage 3: lyrics ----------
     def transcribe(self, job, out: Path):
@@ -438,6 +444,16 @@ class RealPipeline:
         from . import lyrics_sync
         lyrics_sync.after_ai(out, job.title or "", dur, job.lyrics_query, previous, fresh=job.fresh_lookup)
         job.fresh_lookup = False
+        _make_melody(out)
+
+
+def _make_melody(out: Path):
+    """Reference melody for singing scores (melody.json). Never fails the job."""
+    from . import melody
+    try:
+        melody.build(out)
+    except Exception as e:  # noqa: BLE001
+        log.warning("melody for %s failed: %s", out.name, e)
 
 
 def _tag_voices(job, out: Path, tagger):
@@ -502,6 +518,10 @@ class MockPipeline:
             run_ffmpeg("-f", "lavfi", "-i", "sine=frequency=110:duration=30", "-ac", "2",
                        "-b:a", "128k", str(out / "instrumental.mp3"))
         run_ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=30", "-ac", "2", str(out / "vocals.wav"))
+        if getattr(job, "melody_only", False):
+            (out / "vocals.wav").unlink(missing_ok=True)
+            (out / "vocals16k.flac").write_bytes(b"")
+            _make_melody(out)
 
     def transcribe(self, job, out: Path):
         self._sleep(job, 3)
@@ -519,6 +539,7 @@ class MockPipeline:
         job.fresh_lookup = False
         (out / "vocals.wav").unlink(missing_ok=True)
         (out / "vocals16k.flac").write_bytes(b"")   # stands in for the kept 16 kHz vocals
+        _make_melody(out)
 
 
 def _mock_voices(self, job, out: Path):

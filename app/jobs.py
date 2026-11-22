@@ -67,6 +67,7 @@ class Job:
     lyrics_query: str = ""         # song name typed by the user for the lyrics lookup
     fresh_lookup: bool = False     # next AI lyrics run: look online with lyrics_query first
     vocals_only: bool = False      # separating again only to get the vocals back (keep the instrumental)
+    melody_only: bool = False      # separating again only to make the scoring melody (lyrics untouched)
     created: float = field(default_factory=time.time)
     timings: dict = field(default_factory=dict)
 
@@ -227,6 +228,22 @@ class JobManager:
             self._enqueue(job, "download")
         return job
 
+    def prepare_melody(self, video_id: str) -> bool:
+        """Older songs without kept vocals: run vocal removal again (in the
+        background, after everything else) only to make the scoring melody.
+        Returns False when the song can't be prepared or is busy."""
+        job = self.jobs.get(video_id)
+        out = self.data_dir / video_id
+        if not job or job.status != "done":
+            return False
+        if not ((out / "video.mp4").exists() and (out / "instrumental.mp3").exists()):
+            return False
+        job.vocals_only = True
+        job.melody_only = True
+        job.priority = 1000                      # songs people add always go first
+        self._enqueue(job, "download")           # reuses video.mp4: no new download
+        return True
+
     def set_priority(self, video_id: str, priority: int):
         job = self.jobs.get(video_id)
         if not job or priority >= job.priority:
@@ -333,7 +350,10 @@ class JobManager:
                 job.error = f"{stage}: {e}"
                 continue
             job.timings[stage] = round(time.time() - t0, 1)
-            if stage == "separate" and job.skip_lyrics:
+            if stage == "separate" and job.melody_only:
+                job.melody_only = False
+                self._finish(job, out_dir)
+            elif stage == "separate" and job.skip_lyrics:
                 # Stop here. vocals.wav stays on disk so lyrics can be added later.
                 (out_dir / "lyrics.json").write_text(json.dumps({"lines": [], "skipped": True}), encoding="utf-8")
                 job.has_lyrics = False

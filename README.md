@@ -206,6 +206,30 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   TV the sound goes through Web Audio, so it also works when the TV page runs
   on an iPhone/iPad (which ignore a page's normal volume setting); browsers
   without Web Audio use the normal media volume.
+- **Singing score** (🎤 Score: on / off, on the TV bar and the phone
+  Dashboard; Easy / Normal / Hard next to it). The TV page listens through the
+  PC's microphone and compares the singer's pitch with the original singer's
+  melody, line by line: a live pitch lane at the top of the TV (grey = melody,
+  dots = singer, green when on pitch), a short rating after each lyric line,
+  and a score card (0-100, grade S-D, best score for the song) at the end.
+  Octaves don't count (a woman can sing a man's song an octave up); words
+  aren't checked. Scores are saved in `data/scores.json`.
+  - The TV page must be opened **on the PC running the app, as
+    `http://localhost:8000`**: browsers only allow the microphone on
+    localhost (or HTTPS). Opened by its network address, the TV shows a
+    message instead. Allow the microphone when the browser asks.
+  - Use **Backing track** (with Original the mic would hear the original singer).
+  - Speaker + mic in one box (e.g. a JBL PartyBox): the laptop mic hears the
+    music too. The browser's echo cancellation removes most of it, and the
+    rest is told apart by loudness (learned during instrumental parts) and by
+    the music's own pitch. Best results: AUX cable rather than Bluetooth, mic
+    echo/reverb effects low, music moderate, mic level up.
+  - Each song needs a reference melody (`melody.json`, from the kept vocals,
+    a few seconds per song; new songs get it automatically). Songs processed
+    before the vocals were kept need vocal removal again (a few minutes, in
+    the background after other work; lyrics stay as they are): **Prepare
+    all** on the Singing score card does every song, and an older song played
+    with scoring on is prepared for next time.
 - **Phone layout**: four tabs at the bottom. **Dashboard**: what's on the TV,
   Start, Pause, Original / Backing track, Lyrics on/off and size, music
   volume, TV fullscreen, Skip, and *Invite friends* (QR code). **Playlist**: add a song
@@ -334,7 +358,7 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 |---|---|---|
 | POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?, lyrics_query?, redo_lyrics?}` add to playlist (`url` may be a bare video ID) |
 | POST | `/api/next` | finish current song |
-| POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, volume?: 0-100, muted?, started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size / music volume |
+| POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, volume?: 0-100, muted?, scoring?, score_level?: "easy"\|"normal"\|"hard", started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size / music volume / singing score |
 | POST | `/api/playlist/{i}/remove`, `/top` (play next), `/up` (one place up) | edit playlist (`?video_id=` guards against a changed list) |
 | GET | `/api/state` | playlist + queue status (the page polls this every second) |
 | POST | `/api/process` | `{url, language?, priority?, skip_lyrics?}` process without the playlist |
@@ -352,6 +376,9 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 | GET | `/api/singers?list={id}` | the singers of one list |
 | GET | `/api/singers/online?q=` · POST `/api/singers/add` `{mbid}` | look a singer up on MusicBrainz / add it to the list |
 | GET | `/api/singers/{mbid}/songs?refresh=` | a singer's songs (fetched from MusicBrainz the first time) |
+| GET | `/api/melody/{id}` | reference melody for scoring (`status`: ready / preparing / needs_prepare); POST `/api/melody/{id}/prepare` makes it |
+| GET | `/api/score/status` · POST `/api/score/prepare-all` | how many songs are ready for scoring / prepare them all (background) |
+| POST | `/api/scores` · GET `/api/scores?video_id=` | save a score / best scores for a song (or the latest) |
 | GET | `/api/history` | every downloaded song, most recently played first |
 | DELETE | `/api/songs/{id}` | delete a song's files for good |
 | GET | `/api/jobs`, `/api/jobs/{id}` | job status |

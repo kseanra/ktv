@@ -273,6 +273,30 @@
                  font-size: clamp(14px, 1.6vw, 20px); text-align: center; max-width: 90%; }
   #rmStart { padding: 14px; font-size: 17px; }
   .nc-warn { font-size: 13px; color: var(--sung); }
+  /* ---------- singing score ---------- */
+  .scoregrp { display: inline-flex; gap: 6px; }
+  button.on.score { background: #1f3b2e; border-color: var(--ok); }
+  .pitchlane { position: absolute; left: 4%; right: 4%; top: 3%; height: 15%; width: 92%; pointer-events: none;
+               background: rgba(5, 4, 9, .45); border-radius: 10px; }
+  .scoreBadge { position: absolute; top: 14px; left: 14px; max-width: 60%; padding: 8px 12px; border-radius: 10px;
+                background: rgba(20, 18, 28, .85); border: 1px solid var(--line); font-size: clamp(12px, 1.2vw, 16px); }
+  .pitchlane:not(.hidden) ~ .scoreBadge { top: calc(3% + 15% + 10px); }
+  .linePop { position: absolute; right: 6%; top: calc(3% + 15% + 10px); font-size: clamp(20px, 2.6vw, 40px); font-weight: 800;
+             filter: drop-shadow(0 2px 0 #000); animation: pop .25s ease-out; }
+  .linePop.g1 { color: #ffcf3f; } .linePop.g2 { color: var(--ok); } .linePop.g3 { color: #57b8ff; } .linePop.g4 { color: var(--dim); }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .scoreResult { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(5, 4, 9, .82); z-index: 5; }
+  .scoreResult .sr-card { text-align: center; display: grid; gap: 6px; padding: 28px 44px; border-radius: 18px;
+                          background: #15131c; border: 1px solid var(--accent); min-width: min(420px, 80%); }
+  .sr-card .sr-title { color: var(--dim); font-size: clamp(14px, 1.6vw, 22px); max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sr-card .sr-num { font-size: clamp(64px, 11vw, 160px); font-weight: 900; line-height: 1; color: var(--sung); }
+  .sr-card .sr-grade { font-size: clamp(22px, 3vw, 44px); font-weight: 800; }
+  .sr-card .sr-parts { color: var(--dim); font-size: clamp(13px, 1.4vw, 20px); }
+  .sr-card .sr-best { color: var(--ok); font-size: clamp(13px, 1.4vw, 20px); }
+  #scoreCard { display: flex; }
+  body.remote:not([data-view="dashboard"]) #scoreCard { display: none !important; }
+  .nc-score { font-size: 13px; color: var(--ok); }
+  .nc-score.warn { color: var(--sung); }
   .pausedBadge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 14px 28px;
                  border-radius: 14px; background: rgba(0,0,0,.65); color: #fff; font-size: clamp(20px, 3vw, 44px);
                  font-weight: 800; letter-spacing: .08em; pointer-events: none; }
@@ -302,6 +326,13 @@
       <div class="pausedBadge hidden" id="pausedBadge">❚❚ Paused</div>
       <div class="soundBanner hidden" id="soundBanner">🔇 Sound is blocked by the browser: click or press a key on the TV once</div>
       <div class="lyrics"><div class="slot top" id="slot0"></div><div class="slot bottom" id="slot1"></div></div>
+      <canvas class="pitchlane hidden" id="pitchLane"></canvas>
+      <div class="scoreBadge hidden" id="scoreBadge"></div>
+      <div class="linePop hidden" id="linePop"></div>
+      <div class="scoreResult hidden" id="scoreResult"><div class="sr-card">
+        <div class="sr-title" id="srTitle"></div><div class="sr-num" id="srNum">0</div>
+        <div class="sr-grade" id="srGrade"></div><div class="sr-parts" id="srParts"></div><div class="sr-best" id="srBest"></div>
+      </div></div>
 
       <div class="overlay" id="startOverlay">
         <div>
@@ -333,6 +364,7 @@
       <button id="lyrBtn" title="Show or hide the lyrics">Lyrics: on</button>
       <span class="sizegrp" title="Lyrics size"><button id="lyrSmaller">A−</button><span class="pct" id="lyrSize">120%</span><button id="lyrBigger">A+</button></span>
       <span class="volgrp" title="Music volume"><button id="volMute" title="Mute / unmute the music">🔊</button><input type="range" id="volSlider" min="0" max="100" step="5" value="100" aria-label="Music volume"><span class="pct" id="volPct">100%</span></span>
+      <span class="scoregrp"><button id="scoreBtn" class="score" title="Singing score on / off (uses this PC's microphone)">🎤 Score: off</button><button id="scoreLvl" title="Score difficulty: Easy, Normal or Hard">Normal</button></span>
       <button id="offMinus" title="Lyrics earlier">−</button>
       <span class="offset" id="offVal">0.00 s</span>
       <button id="offPlus" title="Lyrics later">+</button>
@@ -351,6 +383,7 @@
       <div class="nc-warn hidden" id="rmWarn">🔇 The TV's sound is blocked by its browser: click or press a key on the TV once.</div>
       <div class="nc-title" id="rmTitle"></div>
       <div class="nc-status" id="rmStatus"></div>
+      <div class="nc-score hidden" id="rmScoreInfo"></div>
       <div class="nc-controls">
         <button id="rmPause">❚❚ Pause</button>
         <div class="toggle"><button id="rmOrig">Original</button><button id="rmInst" class="on">Backing track</button></div>
@@ -361,10 +394,15 @@
           <input type="range" id="rmVol" min="0" max="100" step="5" value="100" aria-label="Music volume on the TV">
           <button id="rmVolUp" title="Louder">+</button><span class="pct" id="rmVolPct">100%</span>
         </div>
+        <span class="scoregrp"><button id="rmScore" class="score" title="Singing score on / off (the TV listens with its PC's microphone)">🎤 Score: off</button><button id="rmScoreLvl" title="Score difficulty">Normal</button></span>
         <button id="rmFs">TV fullscreen</button>
         <button id="rmEditLyr" title="Find, paste or fix the lyrics of this song">Fix lyrics</button>
         <button id="rmSkip">Skip ›</button>
       </div>
+    </div>
+    <div class="dashcard hidden" id="scoreCard">
+      <div><b>Singing score</b><span id="scoreReady">Checking songs…</span></div>
+      <button id="scorePrep" title="Make the scoring melody for every song in the library">Prepare all</button>
     </div>
     <div class="dashcard dash-only" id="inviteCard">
       <div><b>Invite friends</b><span>Show a QR code they can scan to join</span></div>
@@ -1036,6 +1074,7 @@ function syncPlayer(cur) {
 
 function unload() {
   if (loadedId === null) return;
+  scoreSongChange(null);
   loadedId = null; video.pause(); inst.pause(); ignorePauseUntil = Date.now() + 1500;
   video.removeAttribute("src"); inst.removeAttribute("src"); video.load(); inst.load();
   lyrics = []; lastIdx = -2; $("slot0").innerHTML = ""; $("slot1").innerHTML = ""; $("nowTitle").textContent = "";
@@ -1055,6 +1094,7 @@ async function loadLyrics(id, rev) {
 }
 
 async function load(cur) {
+  scoreSongChange(cur);
   loadedId = cur.video_id; advancing = false;
   $("waitOverlay").classList.add("hidden");
   $("nowTitle").textContent = (cur.title || cur.video_id) + (cur.singer ? ` — ${cur.singer}` : "");
@@ -1076,6 +1116,7 @@ async function load(cur) {
 let tvSoundBlocked = false;
 let showLyrics = true, fullscreen = false, paused = false, lyricsScale = 1.2, playerRev = -1, pendingChanges = 0;
 let volume = 100, volMuted = false;
+let scoring = false, scoreLevel = "normal", scoreNoteServer = "", lastScore = null;
 
 function applyPlayerState(ps) {
   // Skip while our own change is in flight, and skip anything older than what we have.
@@ -1085,9 +1126,11 @@ function applyPlayerState(ps) {
   if (ps.lyrics_scale) lyricsScale = ps.lyrics_scale;
   if (typeof ps.volume === "number") volume = ps.volume;
   volMuted = !!ps.muted;
+  scoring = !!ps.scoring; if (ps.score_level) scoreLevel = ps.score_level;
+  scoreNoteServer = ps.score_note || ""; lastScore = ps.last_score || null;
   serverStarted = !!ps.started; tvSoundBlocked = !!ps.sound_blocked;
   if (!isRemote && tvReady && ps.started && !started) startPlayer(false);   // started from a phone
-  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); applyVolume(); renderNowCard();
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); applyVolume(); applyScoring(); renderNowCard();
 }
 
 async function setPlayer(patch) {
@@ -1099,9 +1142,11 @@ async function setPlayer(patch) {
   if ("lyrics_scale" in patch) lyricsScale = patch.lyrics_scale;
   if ("volume" in patch) volume = patch.volume;
   if ("muted" in patch) volMuted = patch.muted;
+  if ("scoring" in patch) scoring = patch.scoring;
+  if ("score_level" in patch) scoreLevel = patch.score_level;
   pendingChanges++;                          // ignore polls until the server replies
   // Runs inside the click handler, so on the TV a real fullscreen request is allowed.
-  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); applyVolume(); renderNowCard();
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); applyVolume(); applyScoring(); renderNowCard();
   let ps = null;
   try {
     const r = await fetch("/api/player", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
@@ -1142,7 +1187,7 @@ updateLyricsButton();
 // through Web Audio gain nodes when possible: iPhone / iPad ignore a page's
 // media volume, but do follow Web Audio. Elsewhere media.volume is the
 // fallback. 100% = the device's own volume (never louder, to avoid distortion).
-let audioCtx = null, gains = null;
+let audioCtx = null, gains = null, musicTap = null;
 const volGain = () => volMuted ? 0 : Math.pow(volume / 100, 2);   // squared: sounds even across the slider
 
 // Build the Web Audio route. Only inside a user action (or when the browser
@@ -1156,9 +1201,12 @@ async function setupAudioRoute() {
     if (ctx.state !== "running") await ctx.resume().catch(() => {});
     if (ctx.state !== "running") { ctx.close().catch(() => {}); return; }   // try again on the next tap
     audioCtx = ctx;
+    // What the speakers play, for the singing score (to tell the music apart from the singer).
+    musicTap = ctx.createAnalyser(); musicTap.fftSize = 2048;
     gains = [video, inst].map((el) => {
       const g = ctx.createGain();
       ctx.createMediaElementSource(el).connect(g).connect(ctx.destination);
+      g.connect(musicTap);
       el.volume = 1;
       return g;
     });
@@ -1167,6 +1215,7 @@ async function setupAudioRoute() {
     gains = null;
   }
   applyVolume();
+  if (audioCtx) applyScoring();
 }
 
 function applyVolume() {
@@ -1239,6 +1288,7 @@ function renderNowCard() {
   $("rmEditLyr").disabled = !nowItem || !nowItem.ready;
   $("rmPause").textContent = paused ? "▶ Resume" : "❚❚ Pause";
   $("rmPause").classList.toggle("on", paused && !!nowItem);
+  renderScoreInfo();
   if (!nowItem) {
     $("rmTitle").textContent = "Nothing playing";
     $("rmStatus").textContent = serverStarted ? "Add a song below." : "The TV player isn't started yet.";
@@ -1249,6 +1299,7 @@ function renderNowCard() {
   $("rmStatus").textContent = !nowItem.ready ? stageInfo(nowItem).text
     : !serverStarted ? "Ready. Tap Start to play it on the TV."
     : paused ? "Paused on the TV" : "Now playing on the TV";
+  renderScoreInfo();
   const has = !!nowItem.has_lyrics;
   const lb = $("rmLyrics");
   lb.disabled = !has;
@@ -1844,7 +1895,7 @@ video.addEventListener("seeked", () => { inst.currentTime = video.currentTime; }
 video.addEventListener("ratechange", () => { inst.playbackRate = video.playbackRate; });
 video.addEventListener("waiting", () => inst.pause());
 video.addEventListener("playing", () => { inst.currentTime = video.currentTime; inst.play().catch(() => {}); });
-video.addEventListener("ended", () => { if (!advancing) { advancing = true; post("/api/next"); } });
+video.addEventListener("ended", () => { scoreFinish(true); if (!advancing) { advancing = true; post("/api/next"); } });
 setInterval(() => {   // drift correction
   if (!video.paused && inst.src && Math.abs(inst.currentTime - video.currentTime) > 0.08) inst.currentTime = video.currentTime;
 }, 500);
@@ -1895,6 +1946,435 @@ const setOff = (d) => { offset = Math.round((offset + d) * 100) / 100; $("offVal
 $("offMinus").onclick = () => setOff(-0.1);
 $("offPlus").onclick = () => setOff(0.1);
 
+// ---------------- singing score ----------------
+// The TV page listens through this PC's microphone, finds the pitch of what it
+// hears (YIN) and compares it with the original singer's melody (melody.json,
+// made on the server from the separated vocals). The mic also hears the music
+// from the speakers: the browser's echo cancellation removes most of it, and
+// what is left is told apart from the singer by loudness (learned during the
+// instrumental parts) and by the music's own pitch. Octaves don't matter, so a
+// woman singing a man's song an octave up scores the same.
+const LEVELS = {
+  easy:   { tol: 1.5, win: 0.25, label: "Easy" },     // tol = semitones, win = timing slack (s)
+  normal: { tol: 0.8, win: 0.15, label: "Normal" },
+  hard:   { tol: 0.4, win: 0.08, label: "Hard" },
+};
+const LEVEL_ORDER = ["easy", "normal", "hard"];
+const TICK = 0.025;              // seconds between pitch checks
+let mic = null;                  // {stream, node, an} while the microphone is on
+let micState = "off";            // off | asking | on | denied | sysdenied | busy | insecure | nodevice | needclick
+let melodyFor = null, melodyData = null, melodyStatus = "", melodyTimer = null;
+let sc = null;                   // scoring session of the song on the TV
+let scoreCur = null, scoreTimer = null, sentNote = null, resultTimer = null, popTimer = null, wasScoring = false;
+const micBuf = new Float32Array(2048), musBuf = new Float32Array(2048);
+const xd = new Float32Array(2048), yd = new Float32Array(1100);
+const fold = (d) => Math.abs((((d % 12) + 18) % 12) - 6);       // semitones apart, octaves ignored
+
+// Pitch of the last ~43 ms of a signal (YIN). midi = MIDI note number, conf 0..1.
+function analyse(an, buf, sr) {
+  an.getFloatTimeDomainData(buf);
+  let e = 0;
+  for (let i = 0; i < buf.length; i++) e += buf[i] * buf[i];
+  const out = { rms: Math.sqrt(e / buf.length), f0: 0, midi: 0, conf: 0 };
+  if (out.rms < 0.002) return out;
+  const f = Math.max(1, Math.floor(sr / 20000)), n = Math.floor(buf.length / f), srd = sr / f;
+  for (let i = 0; i < n; i++) { let a = 0; for (let k = 0; k < f; k++) a += buf[i * f + k]; xd[i] = a / f; }
+  const W = n >> 1, tMin = Math.max(2, Math.floor(srd / 1000)), tMax = Math.min(W - 2, Math.ceil(srd / 70));
+  let run = 0;
+  yd[0] = 1;
+  for (let tau = 1; tau <= tMax; tau++) {
+    let d = 0;
+    for (let j = 0; j < W; j++) { const v = xd[j] - xd[j + tau]; d += v * v; }
+    run += d;
+    yd[tau] = run > 0 ? d * tau / run : 1;
+  }
+  let tau = -1;
+  for (let t = tMin; t < tMax; t++) {
+    if (yd[t] < 0.2) { while (t + 1 < tMax && yd[t + 1] < yd[t]) t++; tau = t; break; }
+  }
+  if (tau < 0) return out;
+  const a = yd[tau - 1], b = yd[tau], c = yd[tau + 1], den = a - 2 * b + c;
+  const f0 = srd / (tau + (den ? 0.5 * (a - c) / den : 0));
+  if (f0 < 70 || f0 > 1100) return out;
+  out.f0 = f0; out.midi = 69 + 12 * Math.log2(f0 / 440); out.conf = 1 - b;
+  return out;
+}
+
+function prepMelody(d) {
+  const m = Float32Array.from(d.midi10, (v) => v / 10);
+  const v = Array.from(m).filter((x) => x > 0).sort((a, b) => a - b);
+  let lo = v.length ? v[Math.floor(v.length * 0.05)] - 2 : 50, hi = v.length ? v[Math.floor(v.length * 0.95)] + 2 : 74;
+  if (hi - lo < 12) { const c = (hi + lo) / 2; lo = c - 6; hi = c + 6; }
+  return { hop: d.hop || 0.02, m, lo, hi, sungSec: v.length * (d.hop || 0.02) };
+}
+const refAt = (mel, t) => (t < 0 ? 0 : mel.m[Math.round(t / mel.hop)] || 0);
+function refNear(mel, t, w) {
+  for (let i = Math.max(0, Math.round((t - w) / mel.hop)), e = Math.round((t + w) / mel.hop); i <= e; i++) if (mel.m[i] > 0) return true;
+  return false;
+}
+function refBest(mel, t, w, midi) {   // closest reference note within the timing slack
+  let best = 99;
+  for (let i = Math.max(0, Math.round((t - w) / mel.hop)), e = Math.round((t + w) / mel.hop); i <= e; i++) {
+    const r = mel.m[i];
+    if (r > 0) best = Math.min(best, fold(midi - r));
+  }
+  return best;
+}
+
+async function loadMelody(id) {
+  clearTimeout(melodyTimer);
+  if (melodyFor !== id) { melodyFor = id; melodyData = null; melodyStatus = "loading"; }
+  try {
+    const d = await (await fetch(`/api/melody/${id}`)).json();
+    if (melodyFor !== id) return;
+    melodyStatus = d.status;
+    if (d.status === "ready") {
+      melodyData = prepMelody(d);
+      if (sc && sc.id === id) sc.mel = melodyData;
+    } else if (d.status === "preparing") {
+      melodyTimer = setTimeout(() => { if (scoring && loadedId === id) loadMelody(id); }, 3000);
+    } else if (d.status === "needs_prepare") {
+      // Older song: get it ready in the background, for next time.
+      fetch(`/api/melody/${id}/prepare`, { method: "POST" }).then(() => { melodyStatus = "preparing_slow"; updateScoreBadge(); }).catch(() => {});
+    }
+  } catch { melodyStatus = "error"; }
+  updateScoreBadge();
+}
+
+function newSession(cur) {
+  const lat = audioCtx ? (audioCtx.outputLatency || audioCtx.baseLatency || 0.02) : 0.02;
+  return { id: cur.video_id, title: cur.title || cur.video_id, singer: cur.singer || "",
+           mel: melodyFor === cur.video_id ? melodyData : null,
+           stats: new Map(), refSec: 0, frames: 0, delay: Math.min(0.4, lat + 0.06),
+           votes: new Float32Array(31), nVotes: 0, leak: null, nLeak: 0, trail: [], lastT: -1,
+           lineHint: 0, shown: new Set(), done: false };
+}
+
+// Lyric line (or 6-second piece when the song has no lyrics) that audio time t belongs to.
+function lineKey(t) {
+  if (!lyrics.length) return "p" + Math.floor(t / 6);
+  let i = Math.min(sc.lineHint, lyrics.length - 1);
+  while (i > 0 && lyrics[i].start + offset - 0.3 > t) i--;
+  while (i < lyrics.length - 1 && lyrics[i].end + offset + 0.3 < t) i++;
+  sc.lineHint = i;
+  return i;
+}
+function lineScore(st) {
+  const cov = st.sung / st.ref, acc = st.sung ? st.hit / st.sung : 0;
+  return Math.round(100 * Math.min(1, cov / 0.75) * (0.25 + 0.75 * acc));
+}
+function totals(s) {
+  let w = 0, sum = 0, ref = 0, sung = 0, hit = 0;
+  for (const st of s.stats.values()) {
+    if (st.ref < 10) continue;
+    w += st.ref; sum += lineScore(st) * st.ref; ref += st.ref; sung += st.sung; hit += st.hit;
+  }
+  return { score: w ? Math.round(sum / w) : 0, pitch: sung ? Math.round(100 * hit / sung) : 0,
+           coverage: ref ? Math.round(100 * Math.min(1, sung / ref)) : 0 };
+}
+const gradeOf = (x) => x >= 90 ? "S" : x >= 80 ? "A" : x >= 65 ? "B" : x >= 50 ? "C" : "D";
+
+function scoreStep() {
+  if (!scoring || !mic || !sc || !sc.mel || sc.done || loadedId !== sc.id) return;
+  if (video.paused || video.seeking || mode !== "inst" || soundBlocked) return;
+  const t = video.currentTime;
+  if (sc.lastT >= 0 && (t < sc.lastT - 0.3 || t > sc.lastT + 1)) { sc.lastT = t; return; }   // jumped: skip
+  sc.lastT = t;
+  const L = LEVELS[scoreLevel] || LEVELS.normal, mel = sc.mel;
+  const m = analyse(mic.an, micBuf, audioCtx.sampleRate);
+  const mu = musicTap ? analyse(musicTap, musBuf, audioCtx.sampleRate) : null;
+  const tr = t - sc.delay;
+  sc.frames++;
+  // Instrumental part: learn how much of the music the mic picks up.
+  if (!refNear(mel, tr, 0.3) && mu && mu.rms > 0.003) {
+    const r = Math.log((m.rms + 1e-5) / mu.rms);
+    sc.leak = sc.leak == null ? r : sc.leak * 0.98 + r * 0.02;
+    sc.nLeak++;
+  }
+  let voice = m.f0 > 0 && m.conf > 0.55 && m.rms > 0.004;
+  if (voice && mu && sc.nLeak > 20) {
+    const expected = Math.exp(sc.leak) * mu.rms;
+    if (m.rms < expected * 1.6) voice = false;                         // only the music
+    else if (mu.f0 > 0 && mu.conf > 0.7 && fold(m.midi - mu.midi) < 0.6 && m.rms < expected * 3) voice = false;
+  }
+  // Delay between the music playing and the mic hearing the singer (speakers, Bluetooth, mic):
+  // found from which delay makes the singing match the melody best.
+  if (voice) {
+    for (let k = 0; k < 31; k++) {
+      sc.votes[k] *= 0.999;
+      const r = refAt(mel, t - k * 0.02);
+      if (r > 0 && fold(m.midi - r) < 0.5) sc.votes[k] += 1;
+    }
+    if (++sc.nVotes >= 120 && sc.nVotes % 20 === 0) {
+      let best = 0, bv = -1;
+      for (let k = 1; k < 30; k++) { const v = sc.votes[k - 1] + sc.votes[k] + sc.votes[k + 1]; if (v > bv) { bv = v; best = k; } }
+      sc.delay += (best * 0.02 - sc.delay) * 0.5;
+    }
+  }
+  const r = refAt(mel, tr);
+  let credit = 0;
+  if (r > 0) {
+    const key = lineKey(tr);
+    let st = sc.stats.get(key);
+    if (!st) sc.stats.set(key, (st = { ref: 0, sung: 0, hit: 0 }));
+    st.ref++; sc.refSec += TICK;
+    if (voice) {
+      st.sung++;
+      const err = refBest(mel, tr, L.win, m.midi);
+      credit = err <= L.tol ? 1 : err <= 2 * L.tol ? 0.5 : 0;
+      st.hit += credit;
+    }
+  }
+  sc.trail.push({ tr, midi: voice ? m.midi : 0, ok: credit });
+  while (sc.trail.length && sc.trail[0].tr < tr - 2.5) sc.trail.shift();
+  // A lyric line just ended: show how it went.
+  if (lyrics.length) {
+    const i = sc.lineHint, ln = lyrics[i - 1];
+    if (i > 0 && ln && tr > ln.end + offset + 0.3 && !sc.shown.has(i - 1)) {
+      sc.shown.add(i - 1);
+      const st = sc.stats.get(i - 1);
+      if (st && st.ref >= 15) showLinePop(lineScore(st));
+    }
+  }
+}
+
+function showLinePop(x) {
+  const [txt, cls] = x >= 90 ? ["Perfect!", "g1"] : x >= 75 ? ["Great!", "g2"] : x >= 55 ? ["Good", "g3"] : ["Keep going", "g4"];
+  const el = $("linePop");
+  el.textContent = txt; el.className = "linePop " + cls;
+  clearTimeout(popTimer);
+  popTimer = setTimeout(() => el.classList.add("hidden"), 1500);
+}
+
+// Song over (or skipped after most of it): show and save the score.
+function scoreFinish(ended) {
+  if (!sc || sc.done) return;
+  sc.done = true;
+  const s = sc;
+  if (!s.mel || s.frames * TICK < 15) return;                   // not listened to long enough
+  if (s.refSec < s.mel.sungSec * (ended ? 0.25 : 0.4)) return;  // skipped early
+  const t = totals(s);
+  if (t.coverage < 5) return;                                   // nobody sang
+  const grade = gradeOf(t.score);
+  $("srTitle").textContent = s.title + (s.singer ? ` — ${s.singer}` : "");
+  $("srNum").textContent = t.score;
+  $("srGrade").textContent = grade;
+  $("srParts").textContent = `In tune ${t.pitch}% · Sung ${t.coverage}% · ${LEVELS[scoreLevel]?.label || ""}`;
+  $("srBest").textContent = "";
+  $("scoreResult").classList.remove("hidden");
+  clearTimeout(resultTimer);
+  resultTimer = setTimeout(() => $("scoreResult").classList.add("hidden"), 9000);
+  fetch("/api/scores", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: s.id, score: t.score, grade, pitch: t.pitch, coverage: t.coverage,
+                           level: scoreLevel, singer: s.singer, lines: s.stats.size }) })
+    .then((r) => r.json()).then((d) => {
+      const best = (d.best || [])[0];
+      if (!best) return;
+      $("srBest").textContent = best.time === d.saved.time ? "New best for this song!"
+        : `Best: ${best.score}${best.singer ? " by " + best.singer : ""}`;
+    }).catch(() => {});
+}
+$("scoreResult").addEventListener("click", () => $("scoreResult").classList.add("hidden"));
+
+function scoreSongChange(cur) {
+  if (isRemote) return;
+  scoreFinish(false);
+  scoreCur = cur;
+  sc = cur ? newSession(cur) : null;
+  if (cur && scoring) loadMelody(cur.video_id);
+  updateScoreBadge();
+}
+
+async function ensureMic() {
+  if (mic || micState === "asking") return;
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) { micState = "insecure"; updateScoreBadge(); return; }
+  if (!audioCtx) await setupAudioRoute();
+  if (!audioCtx || audioCtx.state !== "running") { micState = "needclick"; updateScoreBadge(); return; }
+  if (mic || micState === "asking") return;
+  micState = "asking"; updateScoreBadge();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+    if (!scoring) { stream.getTracks().forEach((tr) => tr.stop()); micState = "off"; return; }
+    const node = audioCtx.createMediaStreamSource(stream);
+    const an = audioCtx.createAnalyser();
+    an.fftSize = 2048;
+    node.connect(an);
+    mic = { stream, node, an };
+    micState = "on";
+  } catch (e) {
+    const name = (e && e.name) || "", msg = ((e && e.message) || "").toLowerCase();
+    console.warn("microphone:", name, e && e.message);
+    micState = name === "NotFoundError" || name === "OverconstrainedError" ? "nodevice"
+      : name === "NotReadableError" || name === "AbortError" ? "busy"
+      : msg.includes("system") ? "sysdenied" : "denied";
+    watchMicPermission();
+  }
+  updateScoreBadge();
+}
+
+// When the microphone is allowed later (address bar or Windows settings), start listening by itself.
+let micWatch = null;
+function watchMicPermission() {
+  if (micWatch) return;
+  micWatch = setInterval(async () => {
+    if (!scoring || mic) { clearInterval(micWatch); micWatch = null; return; }
+    let state = "";
+    try { state = (await navigator.permissions.query({ name: "microphone" })).state; } catch { /* not supported */ }
+    // "granted" after a block in the browser, or a retry every 10 s for Windows / busy problems
+    if (state === "granted" || (micState !== "denied" && Date.now() % 10000 < 2000)) {
+      micState = "off"; ensureMic();
+    }
+  }, 2000);
+}
+
+function stopMic() {
+  if (mic) { mic.stream.getTracks().forEach((t) => t.stop()); try { mic.node.disconnect(); } catch { /* gone */ } }
+  mic = null; micState = "off";
+}
+
+// TV: turn the microphone, melody and live display on or off to match "scoring".
+function applyScoring() {
+  const lvl = LEVELS[scoreLevel] || LEVELS.normal;
+  for (const [b, l] of [["scoreBtn", "scoreLvl"], ["rmScore", "rmScoreLvl"]]) {
+    $(b).textContent = scoring ? "🎤 Score: on" : "🎤 Score: off";
+    $(b).classList.toggle("on", scoring);
+    $(l).textContent = lvl.label;
+    $(l).classList.toggle("hidden", !scoring);
+  }
+  $("scoreCard").classList.toggle("hidden", !scoring);
+  if (scoring) refreshScoreStatus();
+  if (isRemote) return;
+  if (scoring && !wasScoring) {
+    if (micState !== "on") micState = "off";   // turning it on again retries
+    if (scoreCur && (!sc || sc.id !== scoreCur.video_id)) sc = newSession(scoreCur);
+    if (loadedId) loadMelody(loadedId);
+    clearInterval(scoreTimer);
+    scoreTimer = setInterval(scoreStep, TICK * 1000);
+  }
+  if (!scoring && wasScoring) {
+    clearInterval(scoreTimer); scoreTimer = null;
+    stopMic();
+    $("linePop").classList.add("hidden");
+  }
+  wasScoring = scoring;
+  if (scoring) ensureMic();
+  updateScoreBadge();
+}
+
+function scoreProblem() {
+  if (!scoring || isRemote) return "";
+  const port = location.port ? ":" + location.port : "";
+  switch (micState) {
+    case "insecure": return `Scoring needs the TV page opened on this PC as http://localhost${port}`;
+    case "needclick": return "Click the TV once to turn the microphone on";
+    case "asking": return "Allow the microphone in the browser";
+    case "denied": return "The browser is blocking the microphone: click the icon left of the address bar, set Microphone to Allow (scoring starts by itself)";
+    case "sysdenied": return "Windows is blocking the microphone: Settings › Privacy & security › Microphone, turn on access for apps and desktop apps";
+    case "busy": return "The microphone can't be opened: close other apps using it (Teams, Zoom…) or check it is plugged in";
+    case "nodevice": return "No microphone found on this PC";
+  }
+  if (!loadedId) return "";
+  if (mode !== "inst") return "Switch to Backing track to score (the original singer would be heard)";
+  switch (melodyStatus) {
+    case "loading": case "preparing": return "Getting this song ready for scoring…";
+    case "needs_prepare": case "preparing_slow": return "Older song: it is being prepared in the background and can be scored next time";
+    case "failed": case "unavailable": case "error": return "This song can't be scored";
+  }
+  return "";
+}
+
+function updateScoreBadge() {
+  if (isRemote) return;
+  const p = scoreProblem();
+  $("scoreBadge").textContent = p ? "🎤 " + p : "";
+  $("scoreBadge").classList.toggle("hidden", !p);
+  if (p !== sentNote) {          // let the phones show it too
+    sentNote = p;
+    fetch("/api/player", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ score_note: p }) }).catch(() => {});
+  }
+}
+
+// Live pitch lane: grey bars = the melody, dots = the singer (green on pitch).
+let laneW = 0, laneH = 0;
+function drawLane() {
+  const cv = $("pitchLane");
+  const on = !isRemote && scoring && mic && sc && sc.mel && loadedId === sc.id && mode === "inst";
+  cv.classList.toggle("hidden", !on);
+  if (!on) return;
+  const dpr = window.devicePixelRatio || 1, W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
+  if (W !== laneW || H !== laneH) { cv.width = laneW = W; cv.height = laneH = H; }
+  const g = cv.getContext("2d"), mel = sc.mel;
+  g.clearRect(0, 0, W, H);
+  const now = video.currentTime - sc.delay, t0 = now - 2, span = 6;
+  const X = (t) => (t - t0) / span * W, pad = H * 0.12;
+  const Y = (mm) => H - pad - (mm - mel.lo) / (mel.hi - mel.lo) * (H - 2 * pad);
+  const bh = Math.max(3 * dpr, (H - 2 * pad) / (mel.hi - mel.lo) * 0.8);
+  g.fillStyle = "rgba(255,255,255,.35)";
+  for (let i = Math.max(0, Math.floor(t0 / mel.hop)), e = Math.ceil((t0 + span) / mel.hop); i < e; i++) {
+    const r = mel.m[i];
+    if (r > 0) g.fillRect(X(i * mel.hop), Y(r) - bh / 2, W / span * mel.hop + 1, bh);
+  }
+  g.fillStyle = "rgba(255,207,63,.8)";
+  g.fillRect(X(now) - dpr, 0, 2 * dpr, H);
+  for (const p of sc.trail) {
+    if (!p.midi) continue;
+    const r = refAt(mel, p.tr) || (mel.lo + mel.hi) / 2;
+    const mm = p.midi + 12 * Math.round((r - p.midi) / 12);       // shown in the melody's octave
+    g.fillStyle = p.ok >= 1 ? "#3ddc97" : p.ok > 0 ? "#ffcf3f" : "#ff8a4f";
+    g.beginPath(); g.arc(X(p.tr), Math.min(H - 3 * dpr, Math.max(3 * dpr, Y(mm))), 3.5 * dpr, 0, 7); g.fill();
+  }
+  const tt = totals(sc);
+  g.font = `800 ${Math.round(H * 0.22)}px ${getComputedStyle(document.body).fontFamily}`;
+  g.textAlign = "right"; g.fillStyle = "#fff";
+  g.fillText(String(tt.score), W - 10 * dpr, H * 0.3);
+}
+
+// "Prepare all": how many library songs can be scored.
+let scoreStatusAt = 0;
+async function refreshScoreStatus(force) {
+  if (!force && Date.now() - scoreStatusAt < 8000) return;
+  scoreStatusAt = Date.now();
+  try {
+    const d = await (await fetch("/api/score/status")).json();
+    const parts = [`${d.ready} of ${d.total} songs ready`];
+    if (d.preparing) parts.push(`${d.preparing} being prepared`);
+    if (d.quick) parts.push(`${d.quick} quick to prepare`);
+    if (d.slow) parts.push(`${d.slow} older songs need vocal removal again (a few minutes each)`);
+    $("scoreReady").textContent = parts.join(" · ");
+    $("scorePrep").disabled = !(d.quick || d.slow);
+  } catch { /* server restarting */ }
+}
+setInterval(() => { if (scoring) refreshScoreStatus(); }, 10000);
+$("scorePrep").onclick = async () => {
+  $("scorePrep").disabled = true;
+  try {
+    const d = await (await fetch("/api/score/prepare-all", { method: "POST" })).json();
+    toast(`Preparing ${d.quick + d.slow} songs in the background` + (d.slow ? " (older ones take a few minutes each)" : ""));
+  } catch { toast("Could not start preparing the songs", true); }
+  refreshScoreStatus(true);
+};
+
+// Phone: score on/off and what the TV reports.
+function renderScoreInfo() {
+  if (!isRemote) return;
+  const el = $("rmScoreInfo");
+  let txt = "", warn = false;
+  if (scoring) {
+    if (scoreNoteServer) { txt = "🎤 TV: " + scoreNoteServer; warn = true; }
+    else if (lastScore) txt = `🎤 Last score: ${lastScore.score} (${lastScore.grade})${lastScore.singer ? " by " + lastScore.singer : ""} — ${lastScore.title}`;
+    else txt = "🎤 The TV is listening: sing into the mic";
+  }
+  el.textContent = txt;
+  el.classList.toggle("warn", warn);
+  el.classList.toggle("hidden", !txt);
+}
+
+const toggleScoring = () => setPlayer({ scoring: !scoring });
+const cycleLevel = () => setPlayer({ score_level: LEVEL_ORDER[(LEVEL_ORDER.indexOf(scoreLevel) + 1) % 3] });
+$("scoreBtn").onclick = $("rmScore").onclick = toggleScoring;
+$("scoreLvl").onclick = $("rmScoreLvl").onclick = cycleLevel;
+
 // ---------------- lyrics: two alternating lines, word-by-word fill ----------------
 let voiceLabels = ["M", "F", "B"];
 function lineHTML(line) {
@@ -1907,6 +2387,7 @@ function lineHTML(line) {
 
 function frame() {
   requestAnimationFrame(frame);
+  drawLane();
   if (!lyrics.length || loadedId === null) { $("countdown").classList.add("hidden"); return; }
   const t = video.currentTime - offset;
   // Active line = the first line that hasn't finished yet.

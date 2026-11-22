@@ -14,6 +14,8 @@ import re
 import socket
 import sys
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config
-from . import catalog, lyrics_sync
+from . import catalog, lyrics_sync, melody
 from .jobs import JobManager, _read_json
 from .pipeline import check_ffmpeg_for_ytdlp, check_js_runtime, extract_video_id, make_pipeline, search_youtube
 
@@ -44,6 +46,10 @@ player = {"mode": "inst", "show_lyrics": True, "fullscreen": False, "paused": Fa
           "lyrics_scale": 1.2,
           "volume": 100,            # music volume on the TV, 0-100 (% of the device's own volume)
           "muted": False,
+          "scoring": False,         # singing score on the TV (needs the TV page on this PC: localhost)
+          "score_level": "normal",  # easy | normal | hard
+          "score_note": "",         # scoring problem reported by the TV (e.g. no microphone)
+          "last_score": None,       # {"title", "score", "grade", "singer"} of the last scored song
           "started": False,         # TV player started (Start on the TV, or from a phone)
           "sound_blocked": False,   # TV browser blocks sound until someone clicks on the TV
           "rev": 0}   # mode: "inst" (backing) | "orig"
@@ -58,6 +64,9 @@ def _load_player_prefs():
         saved = json.loads(_PLAYER_FILE.read_text(encoding="utf-8"))
         player["volume"] = int(min(100, max(0, saved.get("volume", 100))))
         player["muted"] = bool(saved.get("muted", False))
+        player["scoring"] = bool(saved.get("scoring", False))
+        if saved.get("score_level") in ("easy", "normal", "hard"):
+            player["score_level"] = saved["score_level"]
     except Exception:  # noqa: BLE001  (no file yet, or unreadable: keep the defaults)
         pass
 
@@ -65,7 +74,8 @@ def _load_player_prefs():
 def _save_player_prefs():
     try:
         _PLAYER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _PLAYER_FILE.write_text(json.dumps({"volume": player["volume"], "muted": player["muted"]}), encoding="utf-8")
+        keep = {k: player[k] for k in ("volume", "muted", "scoring", "score_level")}
+        _PLAYER_FILE.write_text(json.dumps(keep), encoding="utf-8")
     except OSError as e:
         log.warning("could not save the volume: %s", e)
 
@@ -140,6 +150,9 @@ class PlayerUpdate(BaseModel):
     lyrics_scale: float | None = None  # lyrics size on the TV, 1.0 = standard (0.5 - 3.0)
     volume: int | None = None          # music volume on the TV, 0 - 100
     muted: bool | None = None          # music muted on the TV
+    scoring: bool | None = None        # singing score on / off
+    score_level: str | None = None     # easy | normal | hard
+    score_note: str | None = None      # reported by the TV
     started: bool | None = None        # start the TV player (or, from the TV, reset on load)
     sound_blocked: bool | None = None  # reported by the TV
 
@@ -274,6 +287,16 @@ def update_player(body: PlayerUpdate):
         if body.muted is not None:
             player["muted"] = body.muted
         _save_player_prefs()
+    if body.scoring is not None or body.score_level is not None:
+        if body.scoring is not None:
+            player["scoring"] = body.scoring
+        if body.score_level is not None:
+            if body.score_level not in ("easy", "normal", "hard"):
+                raise HTTPException(400, "score_level must be easy, normal or hard")
+            player["score_level"] = body.score_level
+        _save_player_prefs()
+    if body.score_note is not None:
+        player["score_note"] = body.score_note[:200]
     if body.started is not None:
         player["started"] = body.started
     if body.sound_blocked is not None:
@@ -729,6 +752,168 @@ async def singer_songs(mbid: str, refresh: bool = False):
     except Exception as e:  # noqa: BLE001
         log.warning("songs for %s failed: %s", mbid, e)
         raise HTTPException(502, "Could not get the songs from MusicBrainz. Check the internet connection.")
+
+
+# ---- singing score ----
+# The TV page listens to the singer through this PC's microphone and scores
+# them against the original singer's melody (melody.json, made once per song
+# from the kept vocals). Scores are saved in data/scores.json.
+_melody_pool = ThreadPoolExecutor(1, thread_name_prefix="melody")
+_melody_busy: set[str] = set()
+_melody_failed: dict[str, str] = {}
+_SCORES_FILE = config.DATA_DIR / "scores.json"
+_scores_lock = threading.Lock()
+
+
+def _build_melody_bg(video_id: str):
+    """Make melody.json in the background (one song at a time)."""
+    if video_id in _melody_busy:
+        return
+    _melody_busy.add(video_id)
+
+    def work():
+        try:
+            melody.build(config.DATA_DIR / video_id)
+            _melody_failed.pop(video_id, None)
+        except Exception as e:  # noqa: BLE001
+            log.warning("melody for %s failed: %s", video_id, e)
+            _melody_failed[video_id] = str(e)
+        finally:
+            _melody_busy.discard(video_id)
+    _melody_pool.submit(work)
+
+
+def _melody_state(video_id: str) -> str:
+    """ready | preparing | needs_prepare (older song: vocals must be separated
+    again) | failed | unavailable"""
+    d = config.DATA_DIR / video_id
+    if melody.exists(d):
+        return "ready"
+    job = manager.jobs.get(video_id)
+    if video_id in _melody_busy or (job and job.melody_only and job.status != "done"):
+        return "preparing"
+    if video_id in _melody_failed:
+        return "failed"
+    if melody.has_vocals(d) or (config.MOCK and (d / "vocals16k.flac").exists()):
+        return "can_build"
+    if job and job.status != "done":
+        return "preparing"                 # still being processed: the melody comes with it
+    if (d / "video.mp4").exists() and (d / "instrumental.mp3").exists():
+        return "needs_prepare"
+    return "unavailable"
+
+
+@app.get("/api/melody/{video_id}")
+def get_melody(video_id: str):
+    """The song's reference melody. Songs with kept vocals get it made on the
+    first ask (status "preparing" for 10-30 s: ask again)."""
+    d = _song_dir(video_id)
+    st = _melody_state(video_id)
+    if st == "can_build":
+        _build_melody_bg(video_id)
+        st = "preparing"
+    if st == "ready":
+        data = _read_json(melody.path(d))
+        return {"status": "ready", "hop": data.get("hop", melody.HOP_SEC), "midi10": data.get("midi10", [])}
+    return {"status": st, "error": _melody_failed.get(video_id, "")}
+
+
+@app.post("/api/melody/{video_id}/prepare")
+def prepare_melody(video_id: str):
+    """Get one older song ready for scoring (vocal removal again, in the background)."""
+    _song_dir(video_id)
+    _melody_failed.pop(video_id, None)
+    st = _melody_state(video_id)
+    if st == "can_build":
+        _build_melody_bg(video_id)
+    elif st == "needs_prepare":
+        if not manager.prepare_melody(video_id):
+            raise HTTPException(409, "This song is busy. Try again when it has finished.")
+    elif st == "unavailable":
+        raise HTTPException(409, "This song's files are missing. Delete it in History and add it again.")
+    return {"status": _melody_state(video_id).replace("can_build", "preparing")}
+
+
+@app.get("/api/score/status")
+def score_status():
+    """How many library songs are ready for scoring."""
+    counts = {"ready": 0, "quick": 0, "slow": 0, "preparing": 0, "unavailable": 0}
+    for h in manager.history():
+        st = _melody_state(h["video_id"])
+        key = {"ready": "ready", "can_build": "quick", "needs_prepare": "slow",
+               "preparing": "preparing", "failed": "quick"}.get(st, "unavailable")
+        counts[key] += 1
+    counts["total"] = sum(counts.values())
+    return counts
+
+
+@app.post("/api/score/prepare-all")
+def score_prepare_all():
+    """Get every library song ready for scoring: quick melody step for songs
+    with kept vocals, vocal removal again (after all other work) for older ones."""
+    quick = slow = 0
+    for h in manager.history():
+        vid = h["video_id"]
+        _melody_failed.pop(vid, None)
+        st = _melody_state(vid)
+        if st == "can_build":
+            _build_melody_bg(vid)
+            quick += 1
+        elif st == "needs_prepare" and manager.prepare_melody(vid):
+            slow += 1
+    return {"quick": quick, "slow": slow}
+
+
+class ScoreIn(BaseModel):
+    video_id: str
+    score: int
+    grade: str = ""
+    pitch: int = 0
+    coverage: int = 0
+    level: str = "normal"
+    singer: str = ""
+    lines: int = 0
+
+
+def _read_scores() -> list[dict]:
+    try:
+        return json.loads(_SCORES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+@app.post("/api/scores")
+def add_score(body: ScoreIn):
+    """Save a finished song's score; returns the song's best scores."""
+    d = _song_dir(body.video_id)
+    title, _ = _song_title(body.video_id, d)
+    row = {**body.model_dump(), "score": max(0, min(100, body.score)), "title": title,
+           "singer": body.singer.strip()[:20], "time": time.time()}
+    with _scores_lock:
+        rows = _read_scores()
+        rows.append(row)
+        rows = rows[-2000:]
+        try:
+            _SCORES_FILE.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        except OSError as e:
+            log.warning("could not save the score: %s", e)
+    player["last_score"] = {k: row[k] for k in ("title", "score", "grade", "singer")}
+    player["rev"] += 1
+    return {"saved": row, "best": _best_scores(body.video_id, rows)}
+
+
+def _best_scores(video_id: str, rows: list[dict], n: int = 5) -> list[dict]:
+    mine = [r for r in rows if r.get("video_id") == video_id]
+    mine.sort(key=lambda r: (-r.get("score", 0), r.get("time", 0)))
+    return mine[:n]
+
+
+@app.get("/api/scores")
+def get_scores(video_id: str | None = None, limit: int = 20):
+    rows = _read_scores()
+    if video_id:
+        return _best_scores(video_id, rows, limit)
+    return sorted(rows, key=lambda r: -r.get("time", 0))[:limit]
 
 
 @app.get("/api/history")
