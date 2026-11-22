@@ -9,6 +9,7 @@ import asyncio
 import faulthandler
 import logging
 import io
+import json
 import re
 import socket
 import sys
@@ -41,9 +42,35 @@ playlist: list[dict] = []      # [{"video_id", "singer"}]; playlist[0] is now pl
 # so a page can ignore a stale poll that was sent before its own change landed.
 player = {"mode": "inst", "show_lyrics": True, "fullscreen": False, "paused": False,
           "lyrics_scale": 1.2,
+          "volume": 100,            # music volume on the TV, 0-100 (% of the device's own volume)
+          "muted": False,
           "started": False,         # TV player started (Start on the TV, or from a phone)
           "sound_blocked": False,   # TV browser blocks sound until someone clicks on the TV
           "rev": 0}   # mode: "inst" (backing) | "orig"
+
+
+# Volume and mute are remembered between server restarts (data/player.json).
+_PLAYER_FILE = config.DATA_DIR / "player.json"
+
+
+def _load_player_prefs():
+    try:
+        saved = json.loads(_PLAYER_FILE.read_text(encoding="utf-8"))
+        player["volume"] = int(min(100, max(0, saved.get("volume", 100))))
+        player["muted"] = bool(saved.get("muted", False))
+    except Exception:  # noqa: BLE001  (no file yet, or unreadable: keep the defaults)
+        pass
+
+
+def _save_player_prefs():
+    try:
+        _PLAYER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PLAYER_FILE.write_text(json.dumps({"volume": player["volume"], "muted": player["muted"]}), encoding="utf-8")
+    except OSError as e:
+        log.warning("could not save the volume: %s", e)
+
+
+_load_player_prefs()
 
 
 def reprioritize():
@@ -111,6 +138,8 @@ class PlayerUpdate(BaseModel):
     fullscreen: bool | None = None   # TV video fills the whole screen
     paused: bool | None = None       # pause / resume the song on the TV
     lyrics_scale: float | None = None  # lyrics size on the TV, 1.0 = standard (0.5 - 3.0)
+    volume: int | None = None          # music volume on the TV, 0 - 100
+    muted: bool | None = None          # music muted on the TV
     started: bool | None = None        # start the TV player (or, from the TV, reset on load)
     sound_blocked: bool | None = None  # reported by the TV
 
@@ -239,6 +268,12 @@ def update_player(body: PlayerUpdate):
         player["paused"] = body.paused
     if body.lyrics_scale is not None:
         player["lyrics_scale"] = round(min(3.0, max(0.5, body.lyrics_scale)), 2)
+    if body.volume is not None or body.muted is not None:
+        if body.volume is not None:
+            player["volume"] = int(min(100, max(0, body.volume)))
+        if body.muted is not None:
+            player["muted"] = body.muted
+        _save_player_prefs()
     if body.started is not None:
         player["started"] = body.started
     if body.sound_blocked is not None:

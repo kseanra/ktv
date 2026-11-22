@@ -257,6 +257,16 @@
   .nc-controls .toggle { display: inline-flex; }
   .sizegrp { display: inline-flex; align-items: center; gap: 6px; }
   .sizegrp .pct { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--dim); font-size: 13px; }
+  /* music volume (TV control bar and phone Dashboard) */
+  .volgrp { display: inline-flex; align-items: center; gap: 6px; }
+  .volgrp input[type=range] { width: 110px; accent-color: var(--accent); }
+  .volgrp .pct { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--dim); font-size: 13px; }
+  .volgrp button.muted { background: #4a2030; border-color: var(--accent); }
+  .nc-controls .volrow { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; }
+  .nc-controls .volrow { gap: 6px; }
+  .nc-controls .volrow input[type=range] { flex: 1 1 40px; min-width: 40px; width: 40px; height: 28px; margin: 0; }
+  .nc-controls .volrow button { padding: 10px 12px; }
+  .nc-controls .volrow .pct { min-width: 3em; }
   #rmPause.on { background: var(--sung); border-color: var(--sung); color: #1a1400; font-weight: 600; }
   .soundBanner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 10px 18px;
                  border-radius: 10px; background: rgba(255, 207, 63, .95); color: #1a1400; font-weight: 700;
@@ -322,6 +332,7 @@
       </div>
       <button id="lyrBtn" title="Show or hide the lyrics">Lyrics: on</button>
       <span class="sizegrp" title="Lyrics size"><button id="lyrSmaller">A−</button><span class="pct" id="lyrSize">120%</span><button id="lyrBigger">A+</button></span>
+      <span class="volgrp" title="Music volume"><button id="volMute" title="Mute / unmute the music">🔊</button><input type="range" id="volSlider" min="0" max="100" step="5" value="100" aria-label="Music volume"><span class="pct" id="volPct">100%</span></span>
       <button id="offMinus" title="Lyrics earlier">−</button>
       <span class="offset" id="offVal">0.00 s</span>
       <button id="offPlus" title="Lyrics later">+</button>
@@ -345,6 +356,11 @@
         <div class="toggle"><button id="rmOrig">Original</button><button id="rmInst" class="on">Backing track</button></div>
         <button id="rmLyrics">Lyrics: on</button>
         <span class="sizegrp" title="Lyrics size on the TV"><button id="rmLyrSmaller">A−</button><span class="pct" id="rmLyrSize">120%</span><button id="rmLyrBigger">A+</button></span>
+        <div class="volgrp volrow" title="Music volume on the TV">
+          <button id="rmVolMute" title="Mute / unmute the music">🔊</button><button id="rmVolDown" title="Quieter">−</button>
+          <input type="range" id="rmVol" min="0" max="100" step="5" value="100" aria-label="Music volume on the TV">
+          <button id="rmVolUp" title="Louder">+</button><span class="pct" id="rmVolPct">100%</span>
+        </div>
         <button id="rmFs">TV fullscreen</button>
         <button id="rmEditLyr" title="Find, paste or fix the lyrics of this song">Fix lyrics</button>
         <button id="rmSkip">Skip ›</button>
@@ -952,6 +968,7 @@ function canAutoplay() {
 function startPlayer(clicked) {
   if (started) return;
   started = true;
+  if (clicked || autoplayOK) setupAudioRoute();
   soundBlocked = !clicked && !autoplayOK;
   $("startOverlay").classList.add("hidden");
   applyMode(); updateSoundBanner();
@@ -965,6 +982,8 @@ function updateSoundBanner() {
 
 // Any click or key on the TV unlocks sound.
 function unlockSound() {
+  if (!isRemote && !gains) setupAudioRoute();      // any tap on the TV may enable Web Audio volume
+  if (!isRemote && audioCtx && audioCtx.state !== "running") audioCtx.resume().catch(() => {});
   if (isRemote || !soundBlocked) return;
   soundBlocked = false;
   applyMode(); updateSoundBanner();
@@ -1056,6 +1075,7 @@ async function load(cur) {
 // them and the TV follows on its next poll (within about a second).
 let tvSoundBlocked = false;
 let showLyrics = true, fullscreen = false, paused = false, lyricsScale = 1.2, playerRev = -1, pendingChanges = 0;
+let volume = 100, volMuted = false;
 
 function applyPlayerState(ps) {
   // Skip while our own change is in flight, and skip anything older than what we have.
@@ -1063,9 +1083,11 @@ function applyPlayerState(ps) {
   playerRev = ps.rev;
   mode = ps.mode; showLyrics = ps.show_lyrics; fullscreen = !!ps.fullscreen; paused = !!ps.paused;
   if (ps.lyrics_scale) lyricsScale = ps.lyrics_scale;
+  if (typeof ps.volume === "number") volume = ps.volume;
+  volMuted = !!ps.muted;
   serverStarted = !!ps.started; tvSoundBlocked = !!ps.sound_blocked;
   if (!isRemote && tvReady && ps.started && !started) startPlayer(false);   // started from a phone
-  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); renderNowCard();
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); applyVolume(); renderNowCard();
 }
 
 async function setPlayer(patch) {
@@ -1075,9 +1097,11 @@ async function setPlayer(patch) {
   if ("fullscreen" in patch) fullscreen = patch.fullscreen;
   if ("paused" in patch) paused = patch.paused;
   if ("lyrics_scale" in patch) lyricsScale = patch.lyrics_scale;
+  if ("volume" in patch) volume = patch.volume;
+  if ("muted" in patch) volMuted = patch.muted;
   pendingChanges++;                          // ignore polls until the server replies
   // Runs inside the click handler, so on the TV a real fullscreen request is allowed.
-  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); renderNowCard();
+  applyMode(); updateLyricsButton(); applyFullscreen(); applyPaused(); applyLyricsSize(); applyVolume(); renderNowCard();
   let ps = null;
   try {
     const r = await fetch("/api/player", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
@@ -1112,6 +1136,79 @@ $("lyrSmaller").onclick = $("rmLyrSmaller").onclick = () => resizeLyrics(-0.1);
 $("lyrBigger").onclick = $("rmLyrBigger").onclick = () => resizeLyrics(+0.1);
 applyLyricsSize();
 updateLyricsButton();
+
+// ---------------- music volume ----------------
+// Shared with the phones like the lyrics size. On the TV the sound goes
+// through Web Audio gain nodes when possible: iPhone / iPad ignore a page's
+// media volume, but do follow Web Audio. Elsewhere media.volume is the
+// fallback. 100% = the device's own volume (never louder, to avoid distortion).
+let audioCtx = null, gains = null;
+const volGain = () => volMuted ? 0 : Math.pow(volume / 100, 2);   // squared: sounds even across the slider
+
+// Build the Web Audio route. Only inside a user action (or when the browser
+// allows sound anyway): once routed, the media is silent until the context runs.
+async function setupAudioRoute() {
+  if (isRemote || gains || audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    const ctx = new AC();
+    if (ctx.state !== "running") await ctx.resume().catch(() => {});
+    if (ctx.state !== "running") { ctx.close().catch(() => {}); return; }   // try again on the next tap
+    audioCtx = ctx;
+    gains = [video, inst].map((el) => {
+      const g = ctx.createGain();
+      ctx.createMediaElementSource(el).connect(g).connect(ctx.destination);
+      el.volume = 1;
+      return g;
+    });
+  } catch (e) {
+    console.warn("Web Audio volume not available, using media volume", e);
+    gains = null;
+  }
+  applyVolume();
+}
+
+function applyVolume() {
+  const g = volGain();
+  if (!isRemote) {
+    if (gains) {
+      for (const n of gains) n.gain.setTargetAtTime(g, audioCtx.currentTime, 0.03);
+      if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
+    } else {
+      video.volume = inst.volume = Math.min(1, g);
+    }
+  }
+  const pct = (volMuted ? 0 : volume) + "%";
+  for (const [sl, pc, mu] of [["volSlider", "volPct", "volMute"], ["rmVol", "rmVolPct", "rmVolMute"]]) {
+    if (document.activeElement !== $(sl)) $(sl).value = volume;     // don't fight a finger on the slider
+    $(pc).textContent = volMuted ? "muted" : pct;
+    $(mu).textContent = volMuted || volume === 0 ? "🔇" : volume < 50 ? "🔉" : "🔊";
+    $(mu).classList.toggle("muted", volMuted);
+  }
+  $("rmVolDown").disabled = volume <= 0;
+  $("rmVolUp").disabled = volume >= 100;
+}
+
+// Slider: the TV follows while dragging (a few updates a second), and the
+// final value is always sent.
+let volTimer = null, volLast = 0;
+function sendVolume(v, final) {
+  volume = v; applyVolume();
+  clearTimeout(volTimer);
+  const now = Date.now();
+  if (final || now - volLast > 250) { volLast = now; setPlayer({ volume: v, muted: false }); }
+  else volTimer = setTimeout(() => { volLast = Date.now(); setPlayer({ volume: v, muted: false }); }, 250);
+}
+for (const id of ["volSlider", "rmVol"]) {
+  $(id).addEventListener("input", (e) => sendVolume(+e.target.value, false));
+  $(id).addEventListener("change", (e) => sendVolume(+e.target.value, true));
+}
+const stepVolume = (d) => setPlayer({ volume: Math.max(0, Math.min(100, volume + d)), muted: false });
+$("rmVolDown").onclick = () => stepVolume(-10);
+$("rmVolUp").onclick = () => stepVolume(+10);
+$("volMute").onclick = $("rmVolMute").onclick = () => setPlayer({ muted: !volMuted });
+applyVolume();
 
 // Original = the video's own audio. Backing track = video muted + separated
 // instrumental played alongside, kept locked to the video's clock.

@@ -199,9 +199,16 @@ faster-whisper on GPU also needs the cuBLAS/cuDNN libraries; if it complains, ru
   live streams and videos over the length limit are left out, and a search is
   remembered for 10 minutes. If search stops working, update yt-dlp
   (`pip install -U yt-dlp` in `.venv`).
-- **Phone layout**: three tabs at the bottom. **Dashboard**: what's on the TV,
-  Start, Pause, Original / Backing track, Lyrics on/off and size, TV
-  fullscreen, Skip, and *Invite friends* (QR code). **Playlist**: add a song
+- **Music volume**: a slider with − / + (10% steps) and mute, on the phone
+  Dashboard and in the TV's control bar; every phone and the TV share it, and
+  it is remembered across songs and restarts (`data/player.json`). 100% is
+  the TV device's own volume (it can turn the music down, not louder). On the
+  TV the sound goes through Web Audio, so it also works when the TV page runs
+  on an iPhone/iPad (which ignore a page's normal volume setting); browsers
+  without Web Audio use the normal media volume.
+- **Phone layout**: four tabs at the bottom. **Dashboard**: what's on the TV,
+  Start, Pause, Original / Backing track, Lyrics on/off and size, music
+  volume, TV fullscreen, Skip, and *Invite friends* (QR code). **Playlist**: add a song
   (search by name, or paste a link) and the queue. **History**: search and re-add or
   delete songs. The phone remembers the last tab.
 - **Phones and tablets always get the phone view** (add songs + remote control),
@@ -327,7 +334,7 @@ switches back (Whisper's result is kept in `whisper.json`). Set
 |---|---|---|
 | POST | `/api/queue` | `{url, language?, singer?, skip_lyrics?, duet?, lyrics_query?, redo_lyrics?}` add to playlist (`url` may be a bare video ID) |
 | POST | `/api/next` | finish current song |
-| POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size |
+| POST | `/api/player` | `{mode?: "inst"\|"orig", show_lyrics?, fullscreen?, paused?, lyrics_scale?, volume?: 0-100, muted?, started?}` TV audio mode / lyrics / fullscreen / pause / lyrics size / music volume |
 | POST | `/api/playlist/{i}/remove`, `/top` (play next), `/up` (one place up) | edit playlist (`?video_id=` guards against a changed list) |
 | GET | `/api/state` | playlist + queue status (the page polls this every second) |
 | POST | `/api/process` | `{url, language?, priority?, skip_lyrics?}` process without the playlist |
